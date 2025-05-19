@@ -1,0 +1,18 @@
+debug: true
+server:
+  port: 8080
+
+redis:
+  host: redis
+  port: 6379
+  password: ""
+  db: 0
+
+telegram:
+  bot_token: "your-bot-token"
+  debug: false
+  admin_ids: [123456789] # Список Telegram ID администраторов
+
+jwt:
+  secret: your-secret-key
+  ttl: 24 # hours 

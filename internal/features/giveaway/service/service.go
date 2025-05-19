@@ -1,0 +1,719 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"giveaway-tool-backend/internal/features/giveaway/models"
+	"giveaway-tool-backend/internal/features/giveaway/repository"
+	"giveaway-tool-backend/internal/platform/telegram"
+	"log"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+var (
+	ErrNotFound = errors.New("giveaway not found")
+	ErrNotOwner = errors.New("you are not the owner of this giveaway")
+)
+
+type GiveawayService interface {
+	Create(ctx context.Context, userID int64, input *models.GiveawayCreate) (*models.GiveawayResponse, error)
+	Update(ctx context.Context, userID int64, giveawayID string, input *models.GiveawayUpdate) (*models.GiveawayResponse, error)
+	Delete(ctx context.Context, userID int64, giveawayID string) error
+	GetByID(ctx context.Context, giveawayID string) (*models.GiveawayResponse, error)
+	GetByIDWithUser(ctx context.Context, giveawayID string, userID int64) (*models.GiveawayResponse, error)
+	GetByCreator(ctx context.Context, userID int64) ([]*models.GiveawayResponse, error)
+	Join(ctx context.Context, userID int64, giveawayID string) error
+	GetParticipants(ctx context.Context, giveawayID string) ([]int64, error)
+	GetPrizeTemplates(ctx context.Context) ([]*models.PrizeTemplate, error)
+	CreateCustomPrize(ctx context.Context, input *models.CustomPrizeCreate) (*models.Prize, error)
+	GetWinners(ctx context.Context, userID int64, giveawayID string) ([]models.Winner, error)
+	AddTickets(ctx context.Context, userID int64, giveawayID string, count int64) error
+	GetHistoricalGiveaways(ctx context.Context, userID int64) ([]*models.GiveawayResponse, error)
+	MoveToHistory(ctx context.Context, userID int64, giveawayID string) error
+	GetCreatedGiveaways(ctx context.Context, userID int64) ([]*models.GiveawayDetailedResponse, error)
+	GetParticipatedGiveaways(ctx context.Context, userID int64) ([]*models.GiveawayDetailedResponse, error)
+	GetCreatedGiveawaysHistory(ctx context.Context, userID int64) ([]*models.GiveawayDetailedResponse, error)
+	GetParticipationHistory(ctx context.Context, userID int64) ([]*models.GiveawayDetailedResponse, error)
+	GetTopGiveaways(ctx context.Context, limit int) ([]*models.GiveawayResponse, error)
+}
+
+type giveawayService struct {
+	repo           repository.GiveawayRepository
+	telegramClient *telegram.Client
+	debug          bool
+}
+
+func NewGiveawayService(repo repository.GiveawayRepository, debug bool) GiveawayService {
+	return &giveawayService{
+		repo:           repo,
+		telegramClient: telegram.NewClient(),
+		debug:          debug,
+	}
+}
+
+func (s *giveawayService) Create(ctx context.Context, userID int64, input *models.GiveawayCreate) (*models.GiveawayResponse, error) {
+	if s.debug {
+		log.Printf("[DEBUG] Creating giveaway with duration: %d seconds", input.Duration)
+	}
+
+	if input.MaxParticipants > 0 && input.WinnersCount > input.MaxParticipants {
+		return nil, models.ErrInvalidWinnersCount
+	}
+
+	// Проверяем минимальную длительность в зависимости от режима
+	minDuration := models.MinDurationRelease
+	if s.debug {
+		minDuration = models.MinDurationDebug
+		log.Printf("[DEBUG] Using debug mode minimum duration: %d seconds", minDuration)
+	}
+
+	if input.Duration < minDuration {
+		return nil, fmt.Errorf("duration must be at least %d seconds", minDuration)
+	}
+
+	// Проверяем требования, если они включены
+	if input.Requirements != nil && input.Requirements.Enabled {
+		if s.debug {
+			log.Printf("[DEBUG] Validating requirements for new giveaway")
+		}
+
+		// Валидируем структуру требований
+		if errors := input.Requirements.Validate(); len(errors) > 0 {
+			return nil, fmt.Errorf("invalid requirements: %v", errors)
+		}
+
+		// Проверяем доступность бота в указанных чатах
+		if errors, err := s.telegramClient.ValidateRequirements(input.Requirements); err != nil {
+			return nil, fmt.Errorf("failed to validate requirements: %w", err)
+		} else if len(errors) > 0 {
+			return nil, fmt.Errorf("requirements validation failed: %v", errors)
+		}
+
+		if s.debug {
+			log.Printf("[DEBUG] Requirements validation passed")
+		}
+	}
+
+	// Создаем призы
+	for i := range input.Prizes {
+		prize := &models.Prize{
+			ID:          uuid.New().String(),
+			Type:        models.PrizeType(input.Prizes[i].PrizeType),
+			Name:        fmt.Sprintf("Prize for place %d", input.Prizes[i].Place),
+			Description: fmt.Sprintf("Prize for place %d in giveaway", input.Prizes[i].Place),
+			IsInternal:  true, // По умолчанию считаем призы внутренними
+		}
+
+		if err := s.repo.CreatePrize(ctx, prize); err != nil {
+			return nil, fmt.Errorf("failed to create prize: %w", err)
+		}
+
+		input.Prizes[i].PrizeID = prize.ID
+	}
+
+	giveaway := &models.Giveaway{
+		ID:              uuid.New().String(),
+		CreatorID:       userID,
+		Title:           input.Title,
+		Description:     input.Description,
+		StartedAt:       time.Now(),
+		Duration:        input.Duration,
+		MaxParticipants: input.MaxParticipants,
+		WinnersCount:    input.WinnersCount,
+		Status:          models.GiveawayStatusActive,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+		Prizes:          input.Prizes,
+		AutoDistribute:  input.AutoDistribute,
+		AllowTickets:    input.AllowTickets,
+		Requirements:    input.Requirements,
+	}
+
+	if err := s.repo.Create(ctx, giveaway); err != nil {
+		return nil, err
+	}
+
+	// Отправляем уведомление создателю
+	if err := s.telegramClient.NotifyCreator(userID, giveaway); err != nil {
+		// Логируем ошибку, но не прерываем выполнение
+		if s.debug {
+			log.Printf("[DEBUG] Failed to send notification to creator: %v", err)
+		}
+	}
+
+	return s.toResponse(ctx, giveaway)
+}
+
+func (s *giveawayService) Update(ctx context.Context, userID int64, giveawayID string, input *models.GiveawayUpdate) (*models.GiveawayResponse, error) {
+	giveaway, err := s.repo.GetByID(ctx, giveawayID)
+	if err != nil {
+		return nil, ErrNotFound
+	}
+
+	if giveaway.CreatorID != userID {
+		return nil, ErrNotOwner
+	}
+
+	if !giveaway.IsEditable() {
+		return nil, models.ErrGiveawayNotEditable
+	}
+
+	if input.Title != nil {
+		giveaway.Title = *input.Title
+	}
+	if input.Description != nil {
+		giveaway.Description = *input.Description
+	}
+	if len(input.Prizes) > 0 {
+		giveaway.Prizes = input.Prizes
+	}
+
+	giveaway.UpdatedAt = time.Now()
+
+	if err := s.repo.Update(ctx, giveaway); err != nil {
+		return nil, err
+	}
+
+	return s.toResponse(ctx, giveaway)
+}
+
+func (s *giveawayService) Delete(ctx context.Context, userID int64, giveawayID string) error {
+	giveaway, err := s.repo.GetByID(ctx, giveawayID)
+	if err != nil {
+		return ErrNotFound
+	}
+
+	if giveaway.CreatorID != userID {
+		return ErrNotOwner
+	}
+
+	return s.repo.Delete(ctx, giveawayID)
+}
+
+func (s *giveawayService) GetByID(ctx context.Context, giveawayID string) (*models.GiveawayResponse, error) {
+	giveaway, err := s.repo.GetByID(ctx, giveawayID)
+	if err != nil {
+		return nil, ErrNotFound
+	}
+
+	return s.toResponse(ctx, giveaway)
+}
+
+func (s *giveawayService) GetByIDWithUser(ctx context.Context, giveawayID string, userID int64) (*models.GiveawayResponse, error) {
+	giveaway, err := s.repo.GetByID(ctx, giveawayID)
+	if err != nil {
+		return nil, ErrNotFound
+	}
+
+	return s.toResponseWithUser(ctx, giveaway, userID)
+}
+
+func (s *giveawayService) GetByCreator(ctx context.Context, userID int64) ([]*models.GiveawayResponse, error) {
+	if s.debug {
+		log.Printf("[DEBUG] Getting giveaways for user %d", userID)
+	}
+
+	giveaways, err := s.repo.GetByCreatorAndStatus(ctx, userID, []models.GiveawayStatus{models.GiveawayStatusActive, models.GiveawayStatusPending})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get giveaways: %w", err)
+	}
+
+	if s.debug {
+		log.Printf("[DEBUG] Found %d giveaways for user %d", len(giveaways), userID)
+	}
+
+	responses := make([]*models.GiveawayResponse, len(giveaways))
+	for i, giveaway := range giveaways {
+		response, err := s.toResponse(ctx, giveaway)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert giveaway to response: %w", err)
+		}
+		responses[i] = response
+	}
+
+	return responses, nil
+}
+
+func (s *giveawayService) Join(ctx context.Context, userID int64, giveawayID string) error {
+	if s.debug {
+		log.Printf("[DEBUG] User %d joining giveaway %s", userID, giveawayID)
+	}
+
+	// Получаем информацию о розыгрыше
+	giveaway, err := s.repo.GetByID(ctx, giveawayID)
+	if err != nil {
+		return fmt.Errorf("failed to get giveaway: %w", err)
+	}
+
+	// Проверяем статус розыгрыша
+	if giveaway.Status != models.GiveawayStatusActive {
+		return fmt.Errorf("giveaway is not active")
+	}
+
+	// Проверяем, не является ли пользователь создателем
+	if giveaway.CreatorID == userID {
+		return fmt.Errorf("creator cannot participate in their own giveaway")
+	}
+
+	// Проверяем, не превышено ли максимальное количество участников
+	if giveaway.MaxParticipants > 0 {
+		count, err := s.repo.GetParticipantsCount(ctx, giveawayID)
+		if err != nil {
+			return fmt.Errorf("failed to get participants count: %w", err)
+		}
+		if int(count) >= giveaway.MaxParticipants {
+			return models.ErrMaxParticipantsReached
+		}
+	}
+
+	// Проверяем требования для участия
+	if giveaway.Requirements != nil && giveaway.Requirements.Enabled {
+		if s.debug {
+			log.Printf("[DEBUG] Checking requirements for user %d in giveaway %s", userID, giveawayID)
+		}
+
+		// Проверяем требования через Telegram API
+		meetsRequirements, err := s.telegramClient.CheckRequirements(ctx, userID, giveaway.Requirements)
+		if err != nil {
+			// Если получили ошибку RPS, пропускаем проверку
+			var rpsErr *telegram.RPSError
+			if ok := errors.As(err, &rpsErr); ok {
+				if s.debug {
+					log.Printf("[DEBUG] Got RPS error while checking requirements, skipping checks: %v", err)
+				}
+			} else {
+				return fmt.Errorf("failed to check requirements: %w", err)
+			}
+		} else if !meetsRequirements {
+			return fmt.Errorf("user does not meet giveaway requirements")
+		}
+
+		if s.debug {
+			log.Printf("[DEBUG] Requirements check passed for user %d in giveaway %s", userID, giveawayID)
+		}
+	}
+
+	// Добавляем участника
+	if err := s.repo.AddParticipant(ctx, giveawayID, userID); err != nil {
+		return fmt.Errorf("failed to add participant: %w", err)
+	}
+
+	if s.debug {
+		log.Printf("[DEBUG] User %d successfully joined giveaway %s", userID, giveawayID)
+	}
+
+	return nil
+}
+
+func (s *giveawayService) GetParticipants(ctx context.Context, giveawayID string) ([]int64, error) {
+	return s.repo.GetParticipants(ctx, giveawayID)
+}
+
+func (s *giveawayService) GetPrizeTemplates(ctx context.Context) ([]*models.PrizeTemplate, error) {
+	return s.repo.GetPrizeTemplates(ctx)
+}
+
+func (s *giveawayService) CreateCustomPrize(ctx context.Context, input *models.CustomPrizeCreate) (*models.Prize, error) {
+	prize := &models.Prize{
+		ID:          uuid.New().String(),
+		Type:        models.PrizeTypeCustom,
+		Name:        input.Name,
+		Description: input.Description,
+		IsInternal:  false,
+	}
+
+	if err := s.repo.CreatePrize(ctx, prize); err != nil {
+		return nil, err
+	}
+
+	return prize, nil
+}
+
+func (s *giveawayService) GetWinners(ctx context.Context, userID int64, giveawayID string) ([]models.Winner, error) {
+	if s.debug {
+		log.Printf("[DEBUG] Getting winners for giveaway %s", giveawayID)
+	}
+
+	// Получаем информацию о розыгрыше
+	giveaway, err := s.repo.GetByID(ctx, giveawayID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get giveaway: %w", err)
+	}
+
+	// Проверяем права доступа
+	if giveaway.CreatorID != userID {
+		return nil, fmt.Errorf("only creator can view winners")
+	}
+
+	// Получаем победителей
+	winners, err := s.repo.GetWinners(ctx, giveawayID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get winners: %w", err)
+	}
+
+	if s.debug {
+		log.Printf("[DEBUG] Retrieved %d winners for giveaway %s", len(winners), giveawayID)
+	}
+
+	return winners, nil
+}
+
+func (s *giveawayService) AddTickets(ctx context.Context, userID int64, giveawayID string, count int64) error {
+	if s.debug {
+		log.Printf("[DEBUG] Adding %d tickets for user %d in giveaway %s", count, userID, giveawayID)
+	}
+
+	// Получаем информацию о розыгрыше
+	giveaway, err := s.repo.GetByID(ctx, giveawayID)
+	if err != nil {
+		return fmt.Errorf("failed to get giveaway: %w", err)
+	}
+
+	// Проверяем, разрешены ли билеты
+	if !giveaway.AllowTickets {
+		return fmt.Errorf("tickets are not allowed in this giveaway")
+	}
+
+	// Проверяем, является ли пользователь участником
+	isParticipant, err := s.repo.IsParticipant(ctx, giveawayID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to check participant status: %w", err)
+	}
+	if !isParticipant {
+		return fmt.Errorf("user is not a participant")
+	}
+
+	// Добавляем билеты
+	if err := s.repo.AddTickets(ctx, giveawayID, userID, count); err != nil {
+		return fmt.Errorf("failed to add tickets: %w", err)
+	}
+
+	if s.debug {
+		log.Printf("[DEBUG] Successfully added %d tickets for user %d in giveaway %s", count, userID, giveawayID)
+	}
+
+	return nil
+}
+
+func (s *giveawayService) toResponse(ctx context.Context, giveaway *models.Giveaway) (*models.GiveawayResponse, error) {
+	if s.debug {
+		log.Printf("[DEBUG] Converting giveaway %s to response", giveaway.ID)
+	}
+
+	// Получаем количество участников
+	participantsCount, err := s.repo.GetParticipantsCount(ctx, giveaway.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get participants count: %w", err)
+	}
+
+	response := &models.GiveawayResponse{
+		ID:                giveaway.ID,
+		CreatorID:         giveaway.CreatorID,
+		Title:             giveaway.Title,
+		Description:       giveaway.Description,
+		StartedAt:         giveaway.StartedAt,
+		EndsAt:            giveaway.StartedAt.Add(time.Duration(giveaway.Duration) * time.Second),
+		MaxParticipants:   giveaway.MaxParticipants,
+		WinnersCount:      giveaway.WinnersCount,
+		Status:            giveaway.Status,
+		CreatedAt:         giveaway.CreatedAt,
+		UpdatedAt:         giveaway.UpdatedAt,
+		ParticipantsCount: participantsCount,
+		CanEdit:           giveaway.IsEditable(),
+		UserRole:          "user", // Default role
+		Prizes:            giveaway.Prizes,
+		AutoDistribute:    giveaway.AutoDistribute,
+		AllowTickets:      giveaway.AllowTickets,
+	}
+
+	// Получаем победителей для завершенных розыгрышей
+	if giveaway.Status == models.GiveawayStatusCompleted || giveaway.Status == models.GiveawayStatusHistory {
+		winners, err := s.repo.GetWinners(ctx, giveaway.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get winners: %w", err)
+		}
+		response.Winners = winners
+	}
+
+	if s.debug {
+		log.Printf("[DEBUG] Successfully converted giveaway %s to response", giveaway.ID)
+	}
+
+	return response, nil
+}
+
+func (s *giveawayService) toResponseWithUser(ctx context.Context, giveaway *models.Giveaway, userID int64) (*models.GiveawayResponse, error) {
+	response, err := s.toResponse(ctx, giveaway)
+	if err != nil {
+		return nil, err
+	}
+
+	if giveaway.CreatorID == userID {
+		response.UserRole = "owner"
+	} else {
+		isParticipant, err := s.repo.IsParticipant(ctx, giveaway.ID, userID)
+		if err != nil {
+			return nil, err
+		}
+		if isParticipant {
+			response.UserRole = "participant"
+		}
+	}
+
+	return response, nil
+}
+
+// GetHistoricalGiveaways возвращает список исторических розыгрышей пользователя
+func (s *giveawayService) GetHistoricalGiveaways(ctx context.Context, userID int64) ([]*models.GiveawayResponse, error) {
+	if s.debug {
+		log.Printf("[DEBUG] Getting historical giveaways for user %d", userID)
+	}
+
+	// Получаем исторические розыгрыши
+	giveaways, err := s.repo.GetByCreatorAndStatus(ctx, userID, []models.GiveawayStatus{models.GiveawayStatusHistory})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get historical giveaways: %w", err)
+	}
+
+	// Преобразуем в ответы
+	responses := make([]*models.GiveawayResponse, len(giveaways))
+	for i, giveaway := range giveaways {
+		response, err := s.toResponse(ctx, giveaway)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert giveaway to response: %w", err)
+		}
+		responses[i] = response
+	}
+
+	if s.debug {
+		log.Printf("[DEBUG] Retrieved %d historical giveaways for user %d", len(responses), userID)
+	}
+
+	return responses, nil
+}
+
+// MoveToHistory перемещает розыгрыш в историю
+func (s *giveawayService) MoveToHistory(ctx context.Context, userID int64, giveawayID string) error {
+	giveaway, err := s.repo.GetByID(ctx, giveawayID)
+	if err != nil {
+		return ErrNotFound
+	}
+
+	if giveaway.CreatorID != userID {
+		return ErrNotOwner
+	}
+
+	if giveaway.Status != models.GiveawayStatusCompleted {
+		return errors.New("only completed giveaways can be moved to history")
+	}
+
+	return s.repo.MoveToHistory(ctx, giveawayID)
+}
+
+func (s *giveawayService) GetCreatedGiveaways(ctx context.Context, userID int64) ([]*models.GiveawayDetailedResponse, error) {
+	giveaways, err := s.repo.GetByCreatorAndStatus(ctx, userID, []models.GiveawayStatus{models.GiveawayStatusActive, models.GiveawayStatusPending})
+	if err != nil {
+		return nil, err
+	}
+	return s.toDetailedResponses(ctx, giveaways, userID)
+}
+
+func (s *giveawayService) GetParticipatedGiveaways(ctx context.Context, userID int64) ([]*models.GiveawayDetailedResponse, error) {
+	giveaways, err := s.repo.GetByParticipantAndStatus(ctx, userID, []models.GiveawayStatus{models.GiveawayStatusActive, models.GiveawayStatusPending})
+	if err != nil {
+		return nil, err
+	}
+	return s.toDetailedResponses(ctx, giveaways, userID)
+}
+
+func (s *giveawayService) GetCreatedGiveawaysHistory(ctx context.Context, userID int64) ([]*models.GiveawayDetailedResponse, error) {
+	giveaways, err := s.repo.GetByCreatorAndStatus(ctx, userID, []models.GiveawayStatus{models.GiveawayStatusCompleted, models.GiveawayStatusHistory})
+	if err != nil {
+		return nil, err
+	}
+	return s.toDetailedResponses(ctx, giveaways, userID)
+}
+
+func (s *giveawayService) GetParticipationHistory(ctx context.Context, userID int64) ([]*models.GiveawayDetailedResponse, error) {
+	giveaways, err := s.repo.GetByParticipantAndStatus(ctx, userID, []models.GiveawayStatus{models.GiveawayStatusCompleted, models.GiveawayStatusHistory})
+	if err != nil {
+		return nil, err
+	}
+	return s.toDetailedResponses(ctx, giveaways, userID)
+}
+
+func (s *giveawayService) toDetailedResponses(ctx context.Context, giveaways []*models.Giveaway, userID int64) ([]*models.GiveawayDetailedResponse, error) {
+	responses := make([]*models.GiveawayDetailedResponse, len(giveaways))
+	for i, giveaway := range giveaways {
+		response, err := s.toDetailedResponse(ctx, giveaway, userID)
+		if err != nil {
+			return nil, err
+		}
+		responses[i] = response
+	}
+	return responses, nil
+}
+
+func (s *giveawayService) toDetailedResponse(ctx context.Context, giveaway *models.Giveaway, userID int64) (*models.GiveawayDetailedResponse, error) {
+	participantsCount, err := s.repo.GetParticipantsCount(ctx, giveaway.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Получаем информацию о создателе
+	creator, err := s.repo.GetCreator(ctx, giveaway.CreatorID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Формируем детальную информацию о призах
+	prizes := make([]models.PrizeDetail, len(giveaway.Prizes))
+	for i, prize := range giveaway.Prizes {
+		prizeInfo, err := s.repo.GetPrize(ctx, prize.PrizeID)
+		if err != nil {
+			return nil, err
+		}
+		prizes[i] = models.PrizeDetail{
+			Type:        prizeInfo.Type,
+			Name:        prizeInfo.Name,
+			Description: prizeInfo.Description,
+			IsInternal:  prizeInfo.IsInternal,
+			Status:      s.getPrizeStatus(ctx, giveaway.ID, prize.PrizeID),
+		}
+	}
+
+	// Определяем роль пользователя
+	userRole := "viewer"
+	if giveaway.CreatorID == userID {
+		userRole = "creator"
+	} else {
+		isParticipant, err := s.repo.IsParticipant(ctx, giveaway.ID, userID)
+		if err != nil {
+			return nil, err
+		}
+		if isParticipant {
+			userRole = "participant"
+			// Проверяем, не является ли пользователь победителем
+			winners, err := s.repo.GetWinners(ctx, giveaway.ID)
+			if err != nil {
+				return nil, err
+			}
+			for _, winner := range winners {
+				if winner.UserID == userID {
+					userRole = "winner"
+					break
+				}
+			}
+		}
+	}
+
+	// Получаем информацию о билетах
+	userTickets := 0
+	totalTickets := 0
+	if giveaway.AllowTickets {
+		userTickets, err = s.repo.GetUserTickets(ctx, giveaway.ID, userID)
+		if err != nil {
+			return nil, err
+		}
+		totalTickets, err = s.repo.GetTotalTickets(ctx, giveaway.ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Формируем детальную информацию о победителях
+	var winnerDetails []models.WinnerDetail
+	if giveaway.Status == models.GiveawayStatusCompleted || giveaway.Status == models.GiveawayStatusHistory {
+		winners, err := s.repo.GetWinners(ctx, giveaway.ID)
+		if err != nil {
+			return nil, err
+		}
+		winnerDetails = make([]models.WinnerDetail, len(winners))
+		for i, winner := range winners {
+			winnerUser, err := s.repo.GetUser(ctx, winner.UserID)
+			if err != nil {
+				return nil, err
+			}
+			prizeInfo, err := s.repo.GetPrize(ctx, giveaway.Prizes[winner.Place-1].PrizeID)
+			if err != nil {
+				return nil, err
+			}
+			winnerDetails[i] = models.WinnerDetail{
+				UserID:   winner.UserID,
+				Username: winnerUser.Username,
+				Place:    winner.Place,
+				Prize: models.PrizeDetail{
+					Type:        prizeInfo.Type,
+					Name:        prizeInfo.Name,
+					Description: prizeInfo.Description,
+					IsInternal:  prizeInfo.IsInternal,
+					Status:      s.getPrizeStatus(ctx, giveaway.ID, giveaway.Prizes[winner.Place-1].PrizeID),
+				},
+				ReceivedAt: s.getPrizeReceivedTime(ctx, giveaway.ID, winner.UserID),
+			}
+		}
+	}
+
+	return &models.GiveawayDetailedResponse{
+		ID:                giveaway.ID,
+		CreatorID:         giveaway.CreatorID,
+		CreatorUsername:   creator.Username,
+		Title:             giveaway.Title,
+		Description:       giveaway.Description,
+		StartedAt:         giveaway.StartedAt,
+		EndedAt:           giveaway.StartedAt.Add(time.Duration(giveaway.Duration) * time.Second),
+		Duration:          giveaway.Duration,
+		MaxParticipants:   giveaway.MaxParticipants,
+		ParticipantsCount: participantsCount,
+		WinnersCount:      giveaway.WinnersCount,
+		Status:            giveaway.Status,
+		CreatedAt:         giveaway.CreatedAt,
+		UpdatedAt:         giveaway.UpdatedAt,
+		Winners:           winnerDetails,
+		Prizes:            prizes,
+		UserRole:          userRole,
+		UserTickets:       userTickets,
+		TotalTickets:      totalTickets,
+	}, nil
+}
+
+func (s *giveawayService) getPrizeStatus(ctx context.Context, giveawayID, prizeID string) string {
+	// Здесь должна быть логика определения статуса приза
+	// Например, проверка был ли приз выдан, отменен и т.д.
+	return "pending" // Временная заглушка
+}
+
+func (s *giveawayService) getPrizeReceivedTime(ctx context.Context, giveawayID string, userID int64) time.Time {
+	// Здесь должна быть логика получения времени выдачи приза
+	return time.Time{} // Временная заглушка
+}
+
+// GetTopGiveaways returns top giveaways by participants count
+func (s *giveawayService) GetTopGiveaways(ctx context.Context, limit int) ([]*models.GiveawayResponse, error) {
+	if s.debug {
+		log.Printf("[DEBUG] Getting top %d giveaways", limit)
+	}
+
+	giveaways, err := s.repo.GetTopGiveaways(ctx, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get top giveaways: %w", err)
+	}
+
+	responses := make([]*models.GiveawayResponse, len(giveaways))
+	for i, giveaway := range giveaways {
+		response, err := s.toResponse(ctx, giveaway)
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert giveaway to response: %w", err)
+		}
+		responses[i] = response
+	}
+
+	if s.debug {
+		log.Printf("[DEBUG] Retrieved %d top giveaways", len(responses))
+	}
+
+	return responses, nil
+}

@@ -1,11 +1,36 @@
-version: "3.9"
+version: '3.8'
+
 services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - ADMIN_IDS=${ADMIN_IDS}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=0
+      - DEBUG=true
+    depends_on:
+      - redis
+    networks:
+      - app-network
+
   redis:
     image: redis:7-alpine
-    container_name: giveaway-redis
     ports:
-      - "6339:6379"
+      - "6379:6379"
     volumes:
       - redis-data:/data
+    command: redis-server --appendonly yes
+    networks:
+      - app-network
+
 volumes:
   redis-data:
+
+networks:
+  app-network:
+    driver: bridge

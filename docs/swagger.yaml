@@ -1,0 +1,1056 @@
+basePath: /api/v1
+definitions:
+  models.ChatType:
+    enum:
+    - channel
+    - group
+    - supergroup
+    type: string
+    x-enum-varnames:
+    - ChatTypeChannel
+    - ChatTypeGroup
+    - ChatTypeSupergroup
+  models.CustomPrizeCreate:
+    properties:
+      description:
+        maxLength: 1000
+        minLength: 10
+        type: string
+      name:
+        maxLength: 100
+        minLength: 3
+        type: string
+    required:
+    - description
+    - name
+    type: object
+  models.ErrorResponse:
+    properties:
+      error:
+        example: Error message
+        type: string
+    type: object
+  models.GiveawayCreate:
+    description: Модель для создания нового розыгрыша
+    properties:
+      allow_tickets:
+        description: '@Description Разрешены ли билеты'
+        type: boolean
+      auto_distribute:
+        description: '@Description Автоматическая выдача призов'
+        type: boolean
+      description:
+        description: |-
+          @Description Описание розыгрыша
+          @Required
+          @Min(10)
+          @Max(1000)
+        maxLength: 1000
+        minLength: 10
+        type: string
+      duration:
+        description: |-
+          @Description Длительность розыгрыша в секундах (минимум 5 секунд в режиме отладки, 5 минут в релизном режиме)
+          @Required
+          @Min(5)
+        type: integer
+      max_participants:
+        description: |-
+          @Description Максимальное количество участников (0 = без ограничений)
+          @Min(0)
+        minimum: 0
+        type: integer
+      prizes:
+        description: |-
+          @Description Список призов по местам
+          @Required
+        items:
+          $ref: '#/definitions/models.PrizePlace'
+        type: array
+      requirements:
+        allOf:
+        - $ref: '#/definitions/models.Requirements'
+        description: '@Description Требования для участия'
+      title:
+        description: |-
+          @Description Название розыгрыша
+          @Required
+          @Min(3)
+          @Max(100)
+        maxLength: 100
+        minLength: 3
+        type: string
+      winners_count:
+        description: |-
+          @Description Количество победителей
+          @Required
+          @Min(1)
+        minimum: 1
+        type: integer
+    required:
+    - description
+    - duration
+    - prizes
+    - title
+    - winners_count
+    type: object
+  models.GiveawayDetailedResponse:
+    properties:
+      created_at:
+        type: string
+      creator_id:
+        type: integer
+      creator_username:
+        type: string
+      description:
+        type: string
+      duration:
+        description: в секундах
+        type: integer
+      ended_at:
+        type: string
+      id:
+        type: string
+      max_participants:
+        type: integer
+      participants_count:
+        type: integer
+      prizes:
+        items:
+          $ref: '#/definitions/models.PrizeDetail'
+        type: array
+      started_at:
+        type: string
+      status:
+        $ref: '#/definitions/models.GiveawayStatus'
+      title:
+        type: string
+      total_tickets:
+        description: общее количество билетов
+        type: integer
+      updated_at:
+        type: string
+      user_role:
+        description: creator, participant, winner
+        type: string
+      user_tickets:
+        description: количество билетов пользователя
+        type: integer
+      winners:
+        items:
+          $ref: '#/definitions/models.WinnerDetail'
+        type: array
+      winners_count:
+        type: integer
+    type: object
+  models.GiveawayResponse:
+    properties:
+      allow_tickets:
+        description: Разрешены ли билеты
+        type: boolean
+      auto_distribute:
+        type: boolean
+      can_edit:
+        type: boolean
+      created_at:
+        type: string
+      creator_id:
+        type: integer
+      description:
+        type: string
+      ends_at:
+        type: string
+      id:
+        type: string
+      max_participants:
+        type: integer
+      participants_count:
+        type: integer
+      prizes:
+        items:
+          $ref: '#/definitions/models.PrizePlace'
+        type: array
+      started_at:
+        type: string
+      status:
+        $ref: '#/definitions/models.GiveawayStatus'
+      title:
+        type: string
+      updated_at:
+        type: string
+      user_role:
+        description: owner, participant, user
+        type: string
+      winners:
+        description: Только для завершенных розыгрышей
+        items:
+          $ref: '#/definitions/models.Winner'
+        type: array
+      winners_count:
+        type: integer
+    type: object
+  models.GiveawayStatus:
+    enum:
+    - active
+    - pending
+    - completed
+    - history
+    - cancelled
+    type: string
+    x-enum-comments:
+      GiveawayStatusActive: Активный розыгрыш
+      GiveawayStatusCancelled: Отменен
+      GiveawayStatusCompleted: Завершен, победители выбраны
+      GiveawayStatusHistory: В истории (все призы выданы)
+      GiveawayStatusPending: Ожидает обработки (выбор победителей)
+    x-enum-varnames:
+    - GiveawayStatusActive
+    - GiveawayStatusPending
+    - GiveawayStatusCompleted
+    - GiveawayStatusHistory
+    - GiveawayStatusCancelled
+  models.GiveawayUpdate:
+    properties:
+      description:
+        maxLength: 1000
+        minLength: 10
+        type: string
+      prizes:
+        items:
+          $ref: '#/definitions/models.PrizePlace'
+        type: array
+      title:
+        maxLength: 100
+        minLength: 3
+        type: string
+    type: object
+  models.Prize:
+    properties:
+      description:
+        type: string
+      id:
+        type: string
+      is_internal:
+        description: true для призов, которые выдаются автоматически
+        type: boolean
+      name:
+        type: string
+      type:
+        $ref: '#/definitions/models.PrizeType'
+    type: object
+  models.PrizeDetail:
+    properties:
+      description:
+        type: string
+      is_internal:
+        type: boolean
+      name:
+        type: string
+      status:
+        description: pending, distributed, cancelled
+        type: string
+      type:
+        $ref: '#/definitions/models.PrizeType'
+    type: object
+  models.PrizePlace:
+    properties:
+      place:
+        description: 1 = первое место, 2 = второе место и т.д.
+        type: integer
+      prize_id:
+        type: string
+      prize_type:
+        description: Дублируем тип для удобства получения из Redis
+        type: string
+    type: object
+  models.PrizeTemplate:
+    properties:
+      description:
+        type: string
+      is_internal:
+        type: boolean
+      name:
+        type: string
+      type:
+        $ref: '#/definitions/models.PrizeType'
+    type: object
+  models.PrizeType:
+    enum:
+    - telegram_stars
+    - telegram_premium
+    - telegram_gifts
+    - telegram_stickers
+    - custom
+    type: string
+    x-enum-varnames:
+    - PrizeTypeTelegramStars
+    - PrizeTypeTelegramPremium
+    - PrizeTypeTelegramGifts
+    - PrizeTypeTelegramStickers
+    - PrizeTypeCustom
+  models.Requirement:
+    properties:
+      chat_id:
+        description: ID канала/чата (например, @channel_name или -100123456789)
+        type: string
+      chat_name:
+        description: Название чата/канала для отображения
+        type: string
+      chat_type:
+        allOf:
+        - $ref: '#/definitions/models.ChatType'
+        description: Тип чата
+      type:
+        allOf:
+        - $ref: '#/definitions/models.RequirementType'
+        description: Тип требования
+    type: object
+  models.RequirementType:
+    enum:
+    - subscription
+    - booster
+    type: string
+    x-enum-comments:
+      RequirementTypeBooster: Быть бустером канала/чата
+      RequirementTypeSubscription: Подписка на канал/чат
+    x-enum-varnames:
+    - RequirementTypeSubscription
+    - RequirementTypeBooster
+  models.Requirements:
+    properties:
+      enabled:
+        description: Включены ли требования
+        type: boolean
+      join_type:
+        description: '"all" - все требования, "any" - любое из требований'
+        type: string
+      requirements:
+        description: Список требований
+        items:
+          $ref: '#/definitions/models.Requirement'
+        type: array
+    type: object
+  models.StatusUpdate:
+    properties:
+      status:
+        enum:
+        - active
+        - banned
+        example: active
+        type: string
+    type: object
+  models.TicketGrant:
+    properties:
+      ticket_count:
+        minimum: 1
+        type: integer
+      user_id:
+        type: integer
+    required:
+    - ticket_count
+    - user_id
+    type: object
+  models.UserResponse:
+    description: Публичная информация о пользователе
+    properties:
+      created_at:
+        example: "2024-03-15T14:30:00Z"
+        type: string
+      first_name:
+        example: John
+        type: string
+      id:
+        example: 123456789
+        type: integer
+      last_name:
+        example: Doe
+        type: string
+      role:
+        enum:
+        - user
+        - admin
+        example: user
+        type: string
+      status:
+        enum:
+        - active
+        - banned
+        example: active
+        type: string
+      username:
+        example: johndoe
+        type: string
+    type: object
+  models.Winner:
+    properties:
+      place:
+        type: integer
+      user_id:
+        type: integer
+      username:
+        type: string
+    type: object
+  models.WinnerDetail:
+    properties:
+      place:
+        type: integer
+      prize:
+        $ref: '#/definitions/models.PrizeDetail'
+      received_at:
+        type: string
+      user_id:
+        type: integer
+      username:
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: seinarukiro@gmail.com
+    name: API Support
+    url: https://t.me/seinarukiro
+  description: API Server for Giveaway Tool application. All endpoints require Telegram
+    Mini App init_data for authentication.
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  title: Giveaway Tool API
+  version: "1.0"
+paths:
+  /giveaways:
+    get:
+      consumes:
+      - application/json
+      description: Get list of active and completed giveaways created by the current
+        user
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.GiveawayResponse'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - TelegramInitData: []
+      summary: Get my giveaways
+      tags:
+      - giveaways
+    post:
+      consumes:
+      - application/json
+      description: Create a new giveaway with specified parameters
+      parameters:
+      - description: Giveaway creation data
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/models.GiveawayCreate'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.GiveawayResponse'
+        "400":
+          description: Invalid input data (duration must be at least 5 seconds in
+            debug mode or 5 minutes in release mode)
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "403":
+          description: Forbidden - user is banned
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - TelegramInitData: []
+      summary: Create new giveaway
+      tags:
+      - giveaways
+  /giveaways/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Delete a giveaway (only by creator)
+      parameters:
+      - description: Giveaway ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - TelegramInitData: []
+      summary: Delete giveaway
+      tags:
+      - giveaways
+    get:
+      consumes:
+      - application/json
+      description: Get detailed information about a giveaway
+      parameters:
+      - description: Giveaway ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.GiveawayResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Giveaway not found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - TelegramInitData: []
+      summary: Get giveaway by ID
+      tags:
+      - giveaways
+    put:
+      consumes:
+      - application/json
+      description: Update giveaway details (only within first 5 minutes and only by
+        creator)
+      parameters:
+      - description: Giveaway ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Giveaway update data
+        in: body
+        name: giveaway
+        required: true
+        schema:
+          $ref: '#/definitions/models.GiveawayUpdate'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.GiveawayResponse'
+        "400":
+          description: Invalid input or giveaway not editable
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "403":
+          description: Not the creator
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Giveaway not found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - TelegramInitData: []
+      summary: Update giveaway
+      tags:
+      - giveaways
+  /giveaways/{id}/history:
+    post:
+      consumes:
+      - application/json
+      description: Move a completed giveaway to historical status (only for creator)
+      parameters:
+      - description: Giveaway ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Successfully moved to history
+        "400":
+          description: Giveaway not in completed status
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "403":
+          description: Not the creator
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Giveaway not found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - TelegramInitData: []
+      summary: Move to history
+      tags:
+      - giveaways
+  /giveaways/{id}/join:
+    post:
+      consumes:
+      - application/json
+      description: Join a giveaway as a participant
+      parameters:
+      - description: Giveaway ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Successfully joined
+        "400":
+          description: Giveaway ended or max participants reached
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - TelegramInitData: []
+      summary: Join giveaway
+      tags:
+      - giveaways
+  /giveaways/{id}/participants:
+    get:
+      consumes:
+      - application/json
+      description: Get list of participants for a giveaway
+      parameters:
+      - description: Giveaway ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - TelegramInitData: []
+      summary: Get participants
+      tags:
+      - giveaways
+  /giveaways/{id}/tickets:
+    post:
+      consumes:
+      - application/json
+      description: Grant additional tickets to a user for a giveaway (admin only)
+      parameters:
+      - description: Giveaway ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Ticket grant data
+        in: body
+        name: grant
+        required: true
+        schema:
+          $ref: '#/definitions/models.TicketGrant'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Tickets granted successfully
+        "400":
+          description: Invalid input or tickets not allowed
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "403":
+          description: Not an admin
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - TelegramInitData: []
+      summary: Grant tickets
+      tags:
+      - giveaways
+  /giveaways/{id}/winners:
+    get:
+      consumes:
+      - application/json
+      description: Get list of winners for a completed giveaway (only for creator)
+      parameters:
+      - description: Giveaway ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.Winner'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "403":
+          description: Not the creator
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: Giveaway not found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - TelegramInitData: []
+      summary: Get winners
+      tags:
+      - giveaways
+  /giveaways/history:
+    get:
+      consumes:
+      - application/json
+      description: Get list of historical giveaways (with status 'history') for the
+        current user
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.GiveawayResponse'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - TelegramInitData: []
+      summary: Get historical giveaways
+      tags:
+      - giveaways
+  /giveaways/my/active:
+    get:
+      consumes:
+      - application/json
+      description: Get list of active giveaways created by the current user
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.GiveawayDetailedResponse'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - TelegramInitData: []
+      summary: Get my active giveaways
+      tags:
+      - giveaways
+  /giveaways/my/history:
+    get:
+      consumes:
+      - application/json
+      description: Get list of completed giveaways created by the current user
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.GiveawayDetailedResponse'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - TelegramInitData: []
+      summary: Get my giveaways history
+      tags:
+      - giveaways
+  /giveaways/participated/active:
+    get:
+      consumes:
+      - application/json
+      description: Get list of active giveaways where the current user participates
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.GiveawayDetailedResponse'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - TelegramInitData: []
+      summary: Get active participated giveaways
+      tags:
+      - giveaways
+  /giveaways/participated/history:
+    get:
+      consumes:
+      - application/json
+      description: Get list of completed giveaways where the current user participated
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.GiveawayDetailedResponse'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - TelegramInitData: []
+      summary: Get participation history
+      tags:
+      - giveaways
+  /giveaways/prizes/custom:
+    post:
+      consumes:
+      - application/json
+      description: Create a new custom prize
+      parameters:
+      - description: Custom prize data
+        in: body
+        name: prize
+        required: true
+        schema:
+          $ref: '#/definitions/models.CustomPrizeCreate'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/models.Prize'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - TelegramInitData: []
+      summary: Create custom prize
+      tags:
+      - giveaways
+  /giveaways/prizes/templates:
+    get:
+      consumes:
+      - application/json
+      description: Get list of available prize templates
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.PrizeTemplate'
+            type: array
+      security:
+      - TelegramInitData: []
+      summary: Get prize templates
+      tags:
+      - giveaways
+  /users/{id}:
+    get:
+      consumes:
+      - application/json
+      description: Get user information by ID
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: User data
+          schema:
+            $ref: '#/definitions/models.UserResponse'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "403":
+          description: Forbidden - user is banned
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - TelegramInitData: []
+      summary: Get user by ID
+      tags:
+      - users
+  /users/{id}/status:
+    put:
+      consumes:
+      - application/json
+      description: Update user status (admin only)
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: New status
+        in: body
+        name: status
+        required: true
+        schema:
+          $ref: '#/definitions/models.StatusUpdate'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated user data
+          schema:
+            $ref: '#/definitions/models.UserResponse'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "403":
+          description: Forbidden - not an admin
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - TelegramInitData: []
+      summary: Update user status
+      tags:
+      - users
+  /users/me:
+    get:
+      consumes:
+      - application/json
+      description: Get or create current user based on Telegram init data. If user
+        exists, updates their information if changed.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: User data
+          schema:
+            $ref: '#/definitions/models.UserResponse'
+        "400":
+          description: Invalid init data
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "401":
+          description: Missing init data
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.ErrorResponse'
+      security:
+      - TelegramInitData: []
+      summary: Get current user
+      tags:
+      - users
+securityDefinitions:
+  TelegramInitData:
+    description: 'Telegram Mini App init_data for authentication. This header should
+      contain the raw init_data string from Telegram Mini App. Example: query_id=AAHdF6IQAAAAAN0XohDhrOrc&user=%7B%22id%22%3A123456789%2C%22first_name%22%3A%22Test%22%2C%22last_name%22%3A%22User%22%2C%22username%22%3A%22testuser%22%2C%22language_code%22%3A%22en%22%7D&auth_date=1684062091&hash=c5b7e2f670fdf15479c8f0cd2028d88ad449e1c6273b8c7a69bb32f0f6c6'
+    in: header
+    name: init_data
+    type: apiKey
+swagger: "2.0"
+tags:
+- description: User management endpoints
+  name: users
+- description: Giveaway management endpoints
+  name: giveaways

@@ -1,16 +1,14 @@
 package main
 
 import (
-	"giveaway-tool-backend/internal/handler"
-	"giveaway-tool-backend/internal/redis"
-	"giveaway-tool-backend/internal/repository"
-	"giveaway-tool-backend/internal/service"
+	"giveaway-tool-backend/internal/config"
+	userhttp "giveaway-tool-backend/internal/features/user/delivery/http"
+	userredis "giveaway-tool-backend/internal/features/user/repository/redis"
+	"giveaway-tool-backend/internal/features/user/service"
 	"log"
-	"os"
 
 	"github.com/gin-gonic/gin"
-
-	"giveaway-tool-backend/internal/config"
+	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -19,18 +17,21 @@ func main() {
 		gin.SetMode(gin.DebugMode)
 	}
 
-	rdb := redis.New(cfg.RedisHost, cfg.RedisPassword, cfg.RedisDB)
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     cfg.RedisHost,
+		Password: cfg.RedisPassword,
+		DB:       cfg.RedisDB,
+	})
 
-	userRepo := repository.NewUserRepo(rdb)
+	userRepo := userredis.NewUserRepository(rdb)
 	userSvc := service.NewUserService(userRepo)
+	userHandler := userhttp.NewUserHandler(userSvc)
 
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery())
 
-	group := router.Group("/api/" + os.Getenv("API_VERSION"))
-	router.RouterGroup = *group
-
-	handler.NewUserHandler(router, userSvc)
+	v1 := router.Group("/api/v1")
+	userHandler.RegisterRoutes(v1)
 
 	addr := ":" + cfg.Port
 	log.Printf("⇨ listen %s …", addr)
