@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/gin-contrib/cors"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 	"giveaway-tool-backend/internal/common/config"
 	"giveaway-tool-backend/internal/common/logger"
 	"giveaway-tool-backend/internal/common/middleware"
@@ -20,9 +23,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
-	swaggerFiles "github.com/swaggo/files"
-	ginSwagger "github.com/swaggo/gin-swagger"
-
 	_ "giveaway-tool-backend/docs"
 	"giveaway-tool-backend/internal/platform/telegram"
 )
@@ -111,7 +111,15 @@ func main() {
 		gin.SetMode(gin.ReleaseMode)
 	}
 	router := gin.New()
-	router.Use(middleware.Logger(), gin.Recovery())
+	router.Use(
+		cors.New(cors.Config{
+			AllowOrigins:     []string{"http://localhost:3000"},
+			AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+			AllowHeaders:     []string{"Content-Type", "Authorization", "Accept"},
+			ExposeHeaders:    []string{"Content-Length"},
+			AllowCredentials: true,
+		}),
+		middleware.Logger(), gin.Recovery())
 
 	// Swagger documentation
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
