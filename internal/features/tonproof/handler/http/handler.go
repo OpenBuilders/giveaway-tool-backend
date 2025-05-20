@@ -50,13 +50,16 @@ func (h *Handler) VerifyProof(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.service.VerifyProof(c.Request.Context(), userID.(int64), &req)
+	err := h.service.VerifyProof(c.Request.Context(), userID.(int64), &req)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, resp)
+	c.JSON(http.StatusOK, models.TONProofResponse{
+		Success: true,
+		Message: "Successfully verified",
+	})
 }
 
 // @Summary Check TON Proof status

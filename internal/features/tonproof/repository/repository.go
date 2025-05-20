@@ -6,8 +6,15 @@ import (
 )
 
 type Repository interface {
-	SaveProof(ctx context.Context, userID int64, proof *models.TONProofRecord) error
+	// SaveProof сохраняет запись о верификации
+	SaveProof(ctx context.Context, record *models.TONProofRecord) error
+
+	// GetProof получает запись о верификации по ID пользователя
 	GetProof(ctx context.Context, userID int64) (*models.TONProofRecord, error)
-	DeleteProof(ctx context.Context, userID int64) error
-	IsProofValid(ctx context.Context, userID int64) (bool, error)
+
+	// GenerateState генерирует новое состояние для верификации
+	GenerateState(ctx context.Context, userID int64) (*models.TONProofState, error)
+
+	// GetState получает состояние по ID пользователя
+	GetState(ctx context.Context, userID int64) (*models.TONProofState, error)
 }
