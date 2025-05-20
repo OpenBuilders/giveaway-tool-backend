@@ -5,11 +5,12 @@ import "time"
 // TONProofRequest represents a request for TON Proof verification
 // @Description Request for TON Proof verification
 type TONProofRequest struct {
-	Address     string `json:"address" binding:"required"`
-	Network     string `json:"network" binding:"required"`
-	Proof       string `json:"proof" binding:"required"`
-	State       string `json:"state" binding:"required"`
-	WalletState string `json:"wallet_state" binding:"required"`
+	Address     string `json:"address" binding:"required" example:"EQD4FPq-PRD4YtG87wgL7AErgQwHUMFQ-JxyYw8jzBPhqjfH"` // TON адрес кошелька
+	Network     string `json:"network" binding:"required" example:"mainnet"`                                          // Сеть (mainnet/testnet)
+	Proof       string `json:"proof" binding:"required" example:"base64_encoded_signature"`                           // Подпись сообщения
+	State       string `json:"state" binding:"required" example:"random_state_string"`                                // Случайная строка состояния
+	WalletState string `json:"wallet_state" binding:"required" example:"wallet_state"`                                // Состояние кошелька
+	PublicKey   string `json:"public_key" binding:"required" example:"base64_encoded_public_key"`                     // Публичный ключ в формате base64
 }
 
 // TONProofResponse represents a response for the verification request

@@ -1,9 +1,9 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
-	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"giveaway-tool-backend/internal/features/tonproof/models"
@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/xssnick/tonutils-go/address"
+	"github.com/xssnick/tonutils-go/tvm/cell"
 )
 
 type Service interface {
@@ -59,40 +60,46 @@ func (s *service) IsVerified(ctx context.Context, userID int64) (bool, error) {
 }
 
 func (s *service) verifySignature(req *models.TONProofRequest) error {
-	signature, err := base64.StdEncoding.DecodeString(req.Proof)
+	publicKeyBytes, err := base64.StdEncoding.DecodeString(req.PublicKey)
 	if err != nil {
-		return fmt.Errorf("invalid proof format: %w", err)
+		return fmt.Errorf("invalid public key format: %w", err)
+	}
+
+	if len(publicKeyBytes) != 32 {
+		return fmt.Errorf("invalid public key length: expected 32 bytes, got %d", len(publicKeyBytes))
+	}
+
+	signatureBytes, err := base64.StdEncoding.DecodeString(req.Proof)
+	if err != nil {
+		return fmt.Errorf("invalid signature format: %w", err)
+	}
+
+	if len(signatureBytes) != 64 {
+		return fmt.Errorf("invalid signature length: expected 64 bytes, got %d", len(signatureBytes))
 	}
 
 	message := fmt.Sprintf("%s:%s:%s", req.Address, req.Network, req.State)
-	hash := sha256.Sum256([]byte(message))
 
-	publicKey, err := s.getPublicKeyFromAddress(req.Address)
-	if err != nil {
-		return fmt.Errorf("failed to get public key: %w", err)
-	}
-
-	if !ed25519.Verify(publicKey, hash[:], signature) {
+	valid := ed25519.Verify(publicKeyBytes, []byte(message), signatureBytes)
+	if !valid {
 		return fmt.Errorf("invalid signature")
 	}
 
+	addr, err := address.ParseAddr(req.Address)
+	if err != nil {
+		return fmt.Errorf("invalid address format: %w", err)
+	}
+
+	stateCell := cell.BeginCell()
+	stateCell.StoreSlice(publicKeyBytes, 256)
+	stateCell.StoreUInt(0, 8)
+	stateCell.StoreUInt(0, 1)
+
+	stateHash := stateCell.EndCell().Hash()
+
+	if !bytes.Equal(addr.Data(), stateHash) {
+		return fmt.Errorf("public key does not match the address")
+	}
+
 	return nil
-}
-
-func (s *service) getPublicKeyFromAddress(addrStr string) (ed25519.PublicKey, error) {
-	addr, err := address.ParseAddr(addrStr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid TON address: %w", err)
-	}
-
-	key, err := base64.StdEncoding.DecodeString(addr.String())
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode address: %w", err)
-	}
-
-	if len(key) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("invalid public key length: expected %d, got %d", ed25519.PublicKeySize, len(key))
-	}
-
-	return key, nil
 }
