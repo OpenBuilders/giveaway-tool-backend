@@ -7,13 +7,14 @@ import (
 
 // Application errors
 var (
-	ErrNotFound       = errors.New("resource not found")
-	ErrInvalidInput   = errors.New("invalid input")
-	ErrUnauthorized   = errors.New("unauthorized")
-	ErrForbidden      = errors.New("forbidden")
-	ErrInternalServer = errors.New("internal server error")
-	ErrConflict       = errors.New("resource conflict")
-	ErrBadRequest     = errors.New("bad request")
+	ErrNotFound          = errors.New("resource not found")
+	ErrInvalidInput      = errors.New("invalid input")
+	ErrUnauthorized      = errors.New("unauthorized")
+	ErrForbidden         = errors.New("forbidden")
+	ErrInternalServer    = errors.New("internal server error")
+	ErrConflict          = errors.New("resource conflict")
+	ErrBadRequest        = errors.New("bad request")
+	ErrRateLimitExceeded = errors.New("rate limit exceeded")
 )
 
 // ErrorResponse represents an error response
@@ -45,6 +46,8 @@ func getStatusCode(err error) int {
 		return http.StatusConflict
 	case errors.Is(err, ErrBadRequest):
 		return http.StatusBadRequest
+	case errors.Is(err, ErrRateLimitExceeded):
+		return http.StatusTooManyRequests
 	default:
 		return http.StatusInternalServerError
 	}
