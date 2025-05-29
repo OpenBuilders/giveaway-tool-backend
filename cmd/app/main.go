@@ -3,9 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/gin-contrib/cors"
-	swaggerFiles "github.com/swaggo/files"
-	ginSwagger "github.com/swaggo/gin-swagger"
 	"giveaway-tool-backend/internal/common/config"
 	"giveaway-tool-backend/internal/common/logger"
 	"giveaway-tool-backend/internal/common/middleware"
@@ -21,10 +18,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
+	"github.com/gin-contrib/cors"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
+
 	_ "giveaway-tool-backend/docs"
 	"giveaway-tool-backend/internal/platform/telegram"
+
+	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 )
 
 // @title           Giveaway Tool API
@@ -115,7 +117,7 @@ func main() {
 		cors.New(cors.Config{
 			AllowOrigins:     []string{"http://localhost:3000"},
 			AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-			AllowHeaders:     []string{"Content-Type", "Authorization", "Accept"},
+			AllowHeaders:     []string{"Content-Type", "Authorization", "Accept", "init_data"},
 			ExposeHeaders:    []string{"Content-Length"},
 			AllowCredentials: true,
 		}),

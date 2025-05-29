@@ -3,7 +3,9 @@ package http
 import (
 	"fmt"
 	"giveaway-tool-backend/internal/features/giveaway/models"
+	"giveaway-tool-backend/internal/features/giveaway/models/dto"
 	"giveaway-tool-backend/internal/features/giveaway/service"
+	"giveaway-tool-backend/internal/platform/telegram"
 	"net/http"
 	"os"
 	"strconv"
@@ -13,13 +15,25 @@ import (
 	initdata "github.com/telegram-mini-apps/init-data-golang"
 )
 
+// contains проверяет наличие элемента в срезе
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
+}
+
 type GiveawayHandler struct {
 	service service.GiveawayService
+	telegramClient *telegram.Client
 }
 
 func NewGiveawayHandler(service service.GiveawayService) *GiveawayHandler {
 	return &GiveawayHandler{
 		service: service,
+		telegramClient: telegram.NewClient(),
 	}
 }
 
@@ -47,6 +61,14 @@ func (h *GiveawayHandler) RegisterRoutes(router *gin.RouterGroup) {
 		prizes.GET("/templates", h.getPrizeTemplates)
 		prizes.POST("/custom", h.createCustomPrize)
 	}
+
+	requirements := router.Group("/requirements")
+	{
+		requirements.GET("/templates", h.getRequirementsTemplates)
+	}
+
+	// Add route for checking bot existence in a channel
+	router.POST("/bot/check", h.checkBotInChannel)
 }
 
 // @title Giveaway API
@@ -64,14 +86,15 @@ func (h *GiveawayHandler) RegisterRoutes(router *gin.RouterGroup) {
 // @Accept json
 // @Produce json
 // @Security TelegramInitData
-// @Param input body models.SwaggerGiveawayCreate true "Данные для создания розыгрыша"
-// @Success 200 {object} models.SwaggerGiveawayResponse "Созданный розыгрыш"
+// @Param input body dto.GiveawayCreateRequest true "Данные для создания розыгрыша"
+// @Success 200 {object} models.GiveawayResponse "Созданный розыгрыш"
 // @Failure 400 {object} models.ErrorResponse "Ошибка валидации"
 // @Failure 401 {object} models.ErrorResponse "Не авторизован"
 // @Failure 500 {object} models.ErrorResponse "Внутренняя ошибка сервера"
 // @Router /giveaways [post]
 func (h *GiveawayHandler) create(c *gin.Context) {
-	var input models.GiveawayCreate
+	var input dto.GiveawayCreateRequest
+	
 	if err := c.ShouldBindJSON(&input); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -83,6 +106,8 @@ func (h *GiveawayHandler) create(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "prize place must be greater than 0"})
 			return
 		}
+		
+		// Валидация типа приза
 		validPrizeTypes := []string{"telegram_stars", "telegram_premium", "telegram_gifts", "telegram_stickers", "custom"}
 		validType := false
 		for _, t := range validPrizeTypes {
@@ -95,15 +120,32 @@ func (h *GiveawayHandler) create(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid prize_type: %s. Must be one of: %v", prize.PrizeType, validPrizeTypes)})
 			return
 		}
-	}
 
-	// Валидация требований
-	if input.Requirements != nil && input.Requirements.Enabled {
-		if input.Requirements.JoinType != "all" && input.Requirements.JoinType != "any" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "join_type must be either 'all' or 'any'"})
-			return
+		// Валидация кастомных полей для кастомных призов
+		if prize.PrizeType == "custom" {
+			if prize.Fields == nil || len(prize.Fields) == 0 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "custom prize must have at least one field"})
+				return
+			}
+			
+			for _, field := range prize.Fields {
+				validFieldTypes := []string{"text", "number"}
+				if !contains(validFieldTypes, field.Type) {
+					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("invalid field type: %s. Must be one of: %v", field.Type, validFieldTypes)})
+					return
+				}
+			}
 		}
 	}
+
+
+	// Валидация требований
+	// if input.Requirements != nil && input.Requirements.Enabled {
+	// 	if input.Requirements.JoinType != "all" && input.Requirements.JoinType != "any" {
+	// 		c.JSON(http.StatusBadRequest, gin.H{"error": "join_type must be either 'all' or 'any'"})
+	// 		return
+	// 	}
+	// }
 
 	user, exists := c.Get("user")
 	if !exists {
@@ -112,7 +154,20 @@ func (h *GiveawayHandler) create(c *gin.Context) {
 	}
 	userData := user.(initdata.User)
 
-	giveaway, err := h.service.Create(c.Request.Context(), userData.ID, &input)
+	// Convert DTO to model type
+	modelInput := models.GiveawayCreate{
+		Title:           input.Title,
+		Description:     input.Description,
+		Duration:        input.Duration,
+		MaxParticipants: input.MaxParticipants,
+		WinnersCount:    input.WinnersCount,
+		Prizes:          input.Prizes,
+		AutoDistribute:  input.AutoDistribute,
+		AllowTickets:    input.AllowTickets,
+		Requirements:    input.Requirements,
+	}
+
+	giveaway, err := h.service.Create(c.Request.Context(), userData.ID, &modelInput)
 	if err != nil {
 		if os.Getenv("DEBUG") == "true" {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "debug_info": fmt.Sprintf("%+v", err)})
@@ -329,6 +384,24 @@ func (h *GiveawayHandler) getParticipants(c *gin.Context) {
 // @Router /giveaways/prizes/templates [get]
 func (h *GiveawayHandler) getPrizeTemplates(c *gin.Context) {
 	templates, err := h.service.GetPrizeTemplates(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, templates)
+}
+
+// @Summary Get requirement templates
+// @Description Get list of available requirement templates for giveaways
+// @Tags giveaways
+// @Accept json
+// @Produce json
+// @Security TelegramInitData
+// @Success 200 {array} models.RequirementTemplate
+// @Router /requirements/templates [get]
+func (h *GiveawayHandler) getRequirementsTemplates(c *gin.Context) {
+	templates, err := h.service.GetRequirementTemplates(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -637,6 +710,88 @@ func (h *GiveawayHandler) getParticipationHistory(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, giveaways)
+}
+
+// @Summary Check if a bot exists in a channel
+// @Description Check if the Telegram bot exists in a channel and has access to member information
+// @Tags bot
+// @Accept json
+// @Produce json
+// @Security TelegramInitData
+// @Param request body map[string]string true "Request with channel username"
+// @Success 200 {object} map[string]interface{} "Channel and bot status information"
+// @Failure 400 {object} models.ErrorResponse "Bad request"
+// @Failure 401 {object} models.ErrorResponse "Unauthorized"
+// @Failure 404 {object} models.ErrorResponse "Bot not found in channel"
+// @Failure 500 {object} models.ErrorResponse "Internal server error"
+// @Router /bot/check [post]
+func (h *GiveawayHandler) checkBotInChannel(c *gin.Context) {
+	// Check authentication
+	_, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	// Parse request body
+	var requestBody struct {
+		Username string `json:"username"`
+	}
+
+	if err := c.ShouldBindJSON(&requestBody); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		return
+	}
+
+	if requestBody.Username == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Username is required"})
+		return
+	}
+
+	// Ensure username is properly formatted with @ prefix if needed
+	username := requestBody.Username
+	if !strings.HasPrefix(username, "@") {
+		username = "@" + username
+	}
+
+	// Шаг 1: Получаем информацию о канале
+	chat, err := h.telegramClient.GetChat(username)
+	if err != nil {
+		// Log the error
+		if os.Getenv("DEBUG") == "true" {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":      "Channel not found or is not accessible",
+				"debug_info": err.Error(),
+			})
+		} else {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Channel not found or is not accessible"})
+		}
+		return
+	}
+
+	// Шаг 2: Проверяем права бота в этом канале
+	chatMember, err := h.telegramClient.GetBotChatMember(username)
+	if err != nil {
+		// Log the error
+		if os.Getenv("DEBUG") == "true" {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":      "Bot is not a member of this channel",
+				"debug_info": err.Error(),
+			})
+		} else {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Bot is not a member of this channel"})
+		}
+		return
+	}
+
+	// Возвращаем полную информацию о канале и статусе бота
+	c.JSON(http.StatusOK, gin.H{
+		"channel": chat,
+		"bot_status": gin.H{
+			"status":          chatMember.Status,
+			"can_check_members": chatMember.CanInviteUsers,
+		},
+	})
 }
 
 // @Summary Get top giveaways

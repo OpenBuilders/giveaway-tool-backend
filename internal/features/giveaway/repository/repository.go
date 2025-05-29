@@ -64,6 +64,9 @@ type GiveawayRepository interface {
 	AssignPrizeTx(ctx context.Context, tx Transaction, userID int64, prizeID string, place int) error
 	GetPrizeTemplates(ctx context.Context) ([]*models.PrizeTemplate, error)
 
+	// Операции с требованиями
+	GetRequirementTemplates(ctx context.Context) ([]*models.RequirementTemplate, error)
+
 	// Операции с билетами
 	AddTickets(ctx context.Context, giveawayID string, userID int64, count int64) error
 	GetUserTickets(ctx context.Context, giveawayID string, userID int64) (int, error)

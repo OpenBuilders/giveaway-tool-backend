@@ -38,6 +38,7 @@ type GiveawayService interface {
 	GetCreatedGiveawaysHistory(ctx context.Context, userID int64) ([]*models.GiveawayDetailedResponse, error)
 	GetParticipationHistory(ctx context.Context, userID int64) ([]*models.GiveawayDetailedResponse, error)
 	GetTopGiveaways(ctx context.Context, limit int) ([]*models.GiveawayResponse, error)
+	GetRequirementTemplates(ctx context.Context) ([]*models.RequirementTemplate, error)
 }
 
 type giveawayService struct {
@@ -716,4 +717,23 @@ func (s *giveawayService) GetTopGiveaways(ctx context.Context, limit int) ([]*mo
 	}
 
 	return responses, nil
+}
+
+// GetRequirementTemplates возвращает список доступных шаблонов требований для розыгрышей
+func (s *giveawayService) GetRequirementTemplates(ctx context.Context) ([]*models.RequirementTemplate, error) {
+	if s.debug {
+		log.Printf("[DEBUG] Getting requirement templates from repository")
+	}
+
+	// Получаем шаблоны из репозитория
+	templates, err := s.repo.GetRequirementTemplates(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get requirement templates: %w", err)
+	}
+
+	if s.debug {
+		log.Printf("[DEBUG] Retrieved %d requirement templates", len(templates))
+	}
+
+	return templates, nil
 }

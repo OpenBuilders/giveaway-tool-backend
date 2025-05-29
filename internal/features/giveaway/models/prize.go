@@ -28,20 +28,22 @@ const (
 
 // Prize представляет приз
 type Prize struct {
-	ID          string    `json:"id"`
-	Type        PrizeType `json:"type"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	IsInternal  bool      `json:"is_internal"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string            `json:"id"`
+	Type        PrizeType         `json:"type"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	IsInternal  bool              `json:"is_internal"`
+	Fields      []CustomPrizeField `json:"fields,omitempty"` // Only for custom prizes
+	CreatedAt   time.Time         `json:"created_at"`
+	UpdatedAt   time.Time         `json:"updated_at"`
 }
 
 // PrizePlace представляет приз для определенного места
 type PrizePlace struct {
 	Place     int    `json:"place" binding:"required,min=1"`
-	PrizeID   string `json:"prize_id"`
-	PrizeType string `json:"prize_type" binding:"required"`
+	// PrizeID   string `json:"prize_id"`
+	PrizeType PrizeType `json:"prize_type" binding:"required"`
+	Fields    []CustomPrizeField `json:"fields,omitempty"`
 }
 
 // WinRecord представляет запись о выигрыше
