@@ -42,6 +42,8 @@ type GiveawayRepository interface {
 	AddToHistoryTx(ctx context.Context, tx Transaction, id string) error
 	MoveToHistory(ctx context.Context, id string) error
 	UpdateStatusAtomic(ctx context.Context, tx Transaction, id string, update models.GiveawayStatusUpdate) error
+	UpdateStatus(ctx context.Context, id string, status models.GiveawayStatus) error
+	UpdateStatusIfPending(ctx context.Context, id string, status models.GiveawayStatus) (bool, error)
 
 	// Операции с участниками
 	AddParticipant(ctx context.Context, giveawayID string, userID int64) error

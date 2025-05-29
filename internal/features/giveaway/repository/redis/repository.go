@@ -1049,3 +1049,53 @@ func (r *redisRepository) GetRequirementTemplates(ctx context.Context) ([]*model
 
 	return templates, nil
 }
+
+// UpdateStatus обновляет статус розыгрыша
+func (r *redisRepository) UpdateStatus(ctx context.Context, id string, status models.GiveawayStatus) error {
+	giveaway, err := r.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	giveaway.Status = status
+	giveaway.UpdatedAt = time.Now()
+
+	return r.Update(ctx, giveaway)
+}
+
+// UpdateStatusIfPending атомарно обновляет статус розыгрыша, только если он находится в статусе pending
+func (r *redisRepository) UpdateStatusIfPending(ctx context.Context, id string, status models.GiveawayStatus) (bool, error) {
+	// Начинаем транзакцию
+	tx, err := r.BeginTx(ctx)
+	if err != nil {
+		return false, fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Получаем розыгрыш с блокировкой
+	giveaway, err := r.GetByIDWithLock(ctx, tx, id)
+	if err != nil {
+		return false, err
+	}
+
+	// Проверяем статус
+	if giveaway.Status != models.GiveawayStatusPending {
+		return false, nil
+	}
+
+	// Обновляем статус
+	giveaway.Status = status
+	giveaway.UpdatedAt = time.Now()
+
+	// Сохраняем изменения
+	if err := r.UpdateTx(ctx, tx, giveaway); err != nil {
+		return false, err
+	}
+
+	// Фиксируем транзакцию
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return true, nil
+}

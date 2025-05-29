@@ -16,11 +16,12 @@ var (
 type GiveawayStatus string
 
 const (
-	GiveawayStatusActive    GiveawayStatus = "active"    // Active giveaway
-	GiveawayStatusPending   GiveawayStatus = "pending"   // Pending processing (selecting winners)
-	GiveawayStatusCompleted GiveawayStatus = "completed" // Completed, winners selected
-	GiveawayStatusHistory   GiveawayStatus = "history"   // In history (all prizes distributed)
-	GiveawayStatusCancelled GiveawayStatus = "cancelled" // Cancelled
+	GiveawayStatusActive     GiveawayStatus = "active"  // Active giveaway
+	GiveawayStatusPending    GiveawayStatus = "pending" // Pending processing (selecting winners)
+	GiveawayStatusProcessing GiveawayStatus = "processing"
+	GiveawayStatusCompleted  GiveawayStatus = "completed" // Completed, winners selected
+	GiveawayStatusHistory    GiveawayStatus = "history"   // In history (all prizes distributed)
+	GiveawayStatusCancelled  GiveawayStatus = "cancelled" // Cancelled
 )
 
 // Giveaway represents a giveaway event
