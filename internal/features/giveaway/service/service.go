@@ -82,8 +82,8 @@ func (s *giveawayService) Create(ctx context.Context, userID int64, input *model
 		}
 
 		// Валидируем структуру требований
-		if errors := input.Requirements.Validate(); len(errors) > 0 {
-			return nil, fmt.Errorf("invalid requirements: %v", errors)
+		if err := input.Requirements.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid requirements: %v", err)
 		}
 
 		// Проверяем доступность бота в указанных чатах
