@@ -604,7 +604,20 @@ func (r *redisRepository) GetPendingGiveaways(ctx context.Context) ([]*models.Gi
 			}
 			return nil, fmt.Errorf("failed to get giveaway %s: %w", id, err)
 		}
-		giveaways = append(giveaways, giveaway)
+
+		// Проверяем статус и обновляем принадлежность к соответствующему множеству
+		pipe := r.client.Pipeline()
+		switch giveaway.Status {
+		case models.GiveawayStatusActive:
+			pipe.SRem(ctx, keyPendingGiveaways, id)
+			pipe.SAdd(ctx, keyActiveGiveaways, id)
+		case models.GiveawayStatusCompleted, models.GiveawayStatusHistory, models.GiveawayStatusCancelled:
+			pipe.SRem(ctx, keyPendingGiveaways, id)
+			pipe.SAdd(ctx, keyHistoryGiveaways, id)
+		case models.GiveawayStatusPending, models.GiveawayStatusProcessing:
+			giveaways = append(giveaways, giveaway)
+		}
+		pipe.Exec(ctx)
 	}
 
 	return giveaways, nil
