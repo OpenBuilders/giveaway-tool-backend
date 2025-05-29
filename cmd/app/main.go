@@ -123,7 +123,7 @@ func main() {
 		cors.New(cors.Config{
 			AllowOrigins:     []string{"http://localhost:3000"},
 			AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-			AllowHeaders:     []string{"Content-Type", "Authorization", "Accept"},
+			AllowHeaders:     []string{"Content-Type", "Authorization", "Accept", "init_data"},
 			ExposeHeaders:    []string{"Content-Length"},
 			AllowCredentials: true,
 		}),

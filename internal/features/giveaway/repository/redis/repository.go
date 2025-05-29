@@ -43,6 +43,7 @@ const (
 	keyPendingGiveaways        = "giveaways:pending"
 	keyHistoryGiveaways        = "giveaways:history"
 	keyPrizeTemplates          = "prize:templates"
+	keyRequirementTemplates    = "requirement:templates"
 	keyTopGiveaways            = "giveaways:top"
 	defaultLockTimeout         = 30 * time.Second
 	keyProcessingSet           = "giveaways:processing"
@@ -994,4 +995,57 @@ func (r *redisRepository) GetTopGiveaways(ctx context.Context, limit int) ([]*mo
 	}
 
 	return result, nil
+}
+
+// GetRequirementTemplates возвращает список доступных шаблонов требований из Redis
+func (r *redisRepository) GetRequirementTemplates(ctx context.Context) ([]*models.RequirementTemplate, error) {
+	// Проверяем, есть ли шаблоны в Redis
+	exists, err := r.client.Exists(ctx, keyRequirementTemplates).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to check if requirement templates exist: %w", err)
+	}
+
+	// Если нет, создаем дефолтные шаблоны
+	if exists == 0 {
+		// Дефолтные шаблоны
+		defaultTemplates := []*models.RequirementTemplate{
+			{
+				ID:   "channel_subscription_en",
+				Name: "Channel Subscription",
+				Type: "subscription",
+			},
+		}
+
+		// Сохраняем шаблоны в Redis
+		pipe := r.client.Pipeline()
+		for _, template := range defaultTemplates {
+			data, err := json.Marshal(template)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal requirement template: %w", err)
+			}
+			pipe.SAdd(ctx, keyRequirementTemplates, data)
+		}
+		_, err := pipe.Exec(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to save default requirement templates: %w", err)
+		}
+	}
+
+	// Получаем шаблоны из Redis
+	templateData, err := r.client.SMembers(ctx, keyRequirementTemplates).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get requirement templates: %w", err)
+	}
+
+	// Преобразуем JSON в структуры
+	templates := make([]*models.RequirementTemplate, 0, len(templateData))
+	for _, data := range templateData {
+		var template models.RequirementTemplate
+		if err := json.Unmarshal([]byte(data), &template); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal requirement template: %w", err)
+		}
+		templates = append(templates, &template)
+	}
+
+	return templates, nil
 }

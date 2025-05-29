@@ -288,9 +288,8 @@ func (s *CompletionService) createWinRecords(ctx context.Context, tx repository.
 			return fmt.Errorf("failed to create win record: %w", err)
 		}
 
-		// Если включена автоматическая выдача призов
 		if giveaway.AutoDistribute {
-			prize, err := s.repo.GetPrizeTx(ctx, tx, prizePlace.PrizeID)
+			prize, err := s.repo.GetPrizeTx(ctx, tx, record.PrizeID)
 			if err != nil {
 				return fmt.Errorf("failed to get prize: %w", err)
 			}
@@ -396,15 +395,16 @@ func (s *CompletionService) notifyWinners(winners []models.Winner, giveaway *mod
 
 // notifyWinner отправляет уведомление одному победителю
 func (s *CompletionService) notifyWinner(winner models.Winner, giveaway *models.Giveaway) error {
-	// Получаем информацию о призе
+	// Проверяем валидность места
 	if winner.Place <= 0 || winner.Place > len(giveaway.Prizes) {
 		return fmt.Errorf("invalid place: %d", winner.Place)
 	}
 
+	// Получаем информацию о призе из базы данных
 	prizePlace := giveaway.Prizes[winner.Place-1]
-	prize, err := s.repo.GetPrize(context.Background(), prizePlace.PrizeID)
+	prize, err := s.repo.GetPrize(s.ctx, prizePlace.PrizeID)
 	if err != nil {
-		return fmt.Errorf("failed to get prize: %w", err)
+		return fmt.Errorf("failed to get prize info: %w", err)
 	}
 
 	prizeDetail := models.PrizeDetail{

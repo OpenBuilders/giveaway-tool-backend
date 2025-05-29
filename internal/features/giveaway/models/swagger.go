@@ -8,25 +8,16 @@ type SwaggerChatType string
 
 // @Description Требование для участия в розыгрыше
 type SwaggerRequirement struct {
-	// @Description Тип требования (subscription - подписка, boost - буст)
-	Type RequirementType `json:"type" example:"subscription" enums:"subscription,boost"`
-	// @Description ID чата или канала
-	ChatID int64 `json:"chat_id" example:"123456789"`
-	// @Description Название чата или канала
-	ChatTitle string `json:"chat_title" example:"My Channel"`
-	// @Description Минимальный уровень буста (только для типа boost)
-	MinLevel int `json:"min_level,omitempty" example:"2"`
+	// @Description Название требования
+	Name string `json:"name" example:"Channel Subscription"`
+	// @Description Значение требования (может быть строкой или массивом строк)
+	Value interface{} `json:"value" example:"@mychannel"`
+	// @Description Тип требования (например, "subscription")
+	Type string `json:"type" example:"subscription" enums:"subscription"`
 }
 
 // @Description Требования для участия в розыгрыше
-type SwaggerRequirements struct {
-	// @Description Включены ли требования
-	Enabled bool `json:"enabled" example:"true"`
-	// @Description Список требований
-	Requirements []Requirement `json:"requirements"`
-	// @Description Тип объединения требований (all - все требования, any - любое из требований)
-	JoinType string `json:"join_type" example:"all" enums:"all,any"`
-}
+type SwaggerRequirements []SwaggerRequirement
 
 // @Description Данные для создания розыгрыша
 type SwaggerGiveawayCreate struct {
