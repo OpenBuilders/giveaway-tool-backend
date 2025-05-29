@@ -118,18 +118,26 @@ func (s *QueueService) processPendingGiveaways() {
 func (s *QueueService) processGiveaway(giveaway *models.Giveaway) error {
 	s.logger.Printf("Processing giveaway %s", giveaway.ID)
 
-	// Проверяем статус розыгрыша
-	if giveaway.Status != models.GiveawayStatusPending {
-		s.logger.Printf("Giveaway %s is not in pending status (current: %s)", giveaway.ID, giveaway.Status)
+	// Атомарно проверяем и обновляем статус
+	updated, err := s.repo.UpdateStatusIfPending(s.ctx, giveaway.ID, models.GiveawayStatusProcessing)
+	if err != nil {
+		return fmt.Errorf("failed to update status: %w", err)
+	}
+	if !updated {
+		s.logger.Printf("Giveaway %s is already being processed or completed", giveaway.ID)
 		return nil
 	}
 
 	// Обрабатываем розыгрыш через ExpirationService
 	if err := s.expirationSvc.ProcessExpiredGiveaways(); err != nil {
+		// В случае ошибки возвращаем статус в pending
+		if updateErr := s.repo.UpdateStatus(s.ctx, giveaway.ID, models.GiveawayStatusPending); updateErr != nil {
+			s.logger.Printf("Failed to revert status for giveaway %s: %v", giveaway.ID, updateErr)
+		}
 		return fmt.Errorf("failed to process giveaway: %w", err)
 	}
 
-	// Удаляем из очереди
+	// Переводим в историю
 	if err := s.repo.AddToHistory(s.ctx, giveaway.ID); err != nil {
 		return fmt.Errorf("failed to add to history: %w", err)
 	}
