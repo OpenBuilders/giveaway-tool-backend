@@ -1,10 +1,17 @@
 version: '3.8'
 
 services:
-  app:
-    build: .
+  frontend:
+    build: ./giveaway-tool-frontend
     ports:
-      - "8080:8080"
+      - "3000:3000"
+    networks:
+      - app-network
+
+  backend:
+    build: ./giveaway-tool-backend
+    ports:
+      - "8000:80"
     environment:
       - BOT_TOKEN=${BOT_TOKEN}
       - ADMIN_IDS=${ADMIN_IDS}

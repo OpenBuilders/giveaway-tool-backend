@@ -1,7 +1,8 @@
-env
+.env
 .idea
 .vscode
 *.log
 vendor/
 tmp/
 dist/ 
+.code-workspace
