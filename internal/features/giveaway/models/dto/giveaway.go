@@ -9,7 +9,7 @@ import (
 // GiveawayCreateRequest represents the request body for creating a new giveaway
 type GiveawayCreateRequest struct {
 	Title           string                `json:"title" binding:"required,min=3,max=100"`
-	Description     string                `json:"description" binding:"required,min=10,max=1000"`
+	Description     string                `json:"description" binding:"max=1000"`
 	Duration        int64                 `json:"duration" binding:"required,min=5"` // in seconds
 	MaxParticipants int                   `json:"max_participants" binding:"min=0"`  // 0 = unlimited
 	WinnersCount    int                   `json:"winners_count" binding:"required,min=1"`
@@ -75,14 +75,3 @@ type SwaggerGiveawayDetailedResponse struct {
 	EndedAt           time.Time             `json:"ended_at" description:"End time of the giveaway"`
 	Duration          int64                 `json:"duration" description:"Duration of the giveaway in seconds"`
 	MaxParticipants   int                   `json:"max_participants" description:"Maximum number of participants"`
-	ParticipantsCount int64                 `json:"participants_count" description:"Current number of participants"`
-	WinnersCount      int                   `json:"winners_count" description:"Number of winners"`
-	Status            models.GiveawayStatus `json:"status" description:"Current status of the giveaway"`
-	CreatedAt         time.Time             `json:"created_at" description:"Creation timestamp"`
-	UpdatedAt         time.Time             `json:"updated_at" description:"Last update timestamp"`
-	Winners           []models.WinnerDetail `json:"winners" description:"List of detailed winners information"`
-	Prizes            []models.PrizeDetail  `json:"prizes" description:"List of detailed prizes information"`
-	UserRole          string                `json:"user_role" description:"User's role in this giveaway (creator/participant)"`
-	UserTickets       int                   `json:"user_tickets" description:"Number of tickets user has in this giveaway"`
-	TotalTickets      int                   `json:"total_tickets" description:"Total number of tickets in this giveaway"`
-}
