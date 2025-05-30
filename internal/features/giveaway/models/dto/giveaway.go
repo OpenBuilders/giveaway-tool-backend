@@ -75,3 +75,14 @@ type SwaggerGiveawayDetailedResponse struct {
 	EndedAt           time.Time             `json:"ended_at" description:"End time of the giveaway"`
 	Duration          int64                 `json:"duration" description:"Duration of the giveaway in seconds"`
 	MaxParticipants   int                   `json:"max_participants" description:"Maximum number of participants"`
+	ParticipantsCount int64                 `json:"participants_count" description:"Current number of participants"`
+	WinnersCount      int                   `json:"winners_count" description:"Number of winners"`
+	Status            models.GiveawayStatus `json:"status" description:"Current status of the giveaway"`
+	CreatedAt         time.Time             `json:"created_at" description:"Creation timestamp"`
+	UpdatedAt         time.Time             `json:"updated_at" description:"Last update timestamp"`
+	Winners           []models.WinnerDetail `json:"winners,omitempty" description:"List of winners with details"`
+	Prizes            []models.PrizeDetail  `json:"prizes" description:"List of prizes with details"`
+	UserRole          string                `json:"user_role" description:"User role (creator, participant, winner)"`
+	UserTickets       int                   `json:"user_tickets" description:"Number of user's tickets"`
+	TotalTickets      int                   `json:"total_tickets" description:"Total number of tickets"`
+}
