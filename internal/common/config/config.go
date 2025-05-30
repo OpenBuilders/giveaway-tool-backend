@@ -10,6 +10,7 @@ type Config struct {
 
 	Server struct {
 		Port int `env:"PORT" envDefault:"8080"`
+		Origin string `env:"ORIGIN" envDefault:"http://localhost:3000"`
 	}
 
 	Redis struct {

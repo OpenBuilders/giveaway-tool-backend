@@ -131,17 +131,24 @@ func (s *giveawayService) Create(ctx context.Context, userID int64, input *model
 		AutoDistribute:  input.AutoDistribute,
 		AllowTickets:    input.AllowTickets,
 		Requirements:    input.Requirements,
+		MsgID:           0,
 	}
 
 	if err := s.repo.Create(ctx, giveaway); err != nil {
 		return nil, err
 	}
 
-	// Отправляем уведомление создателю
-	if err := s.telegramClient.NotifyCreator(userID, giveaway); err != nil {
-		// Логируем ошибку, но не прерываем выполнение
+	// Declare resp outside the if statement scope
+	resp, err := s.telegramClient.NotifyCreator(userID, giveaway)
+	if err != nil {
 		if s.debug {
 			log.Printf("[DEBUG] Failed to send notification to creator: %v", err)
+		}
+	}
+
+	if resultMap, ok := resp.Result.(map[string]interface{}); ok {
+		if messageID, ok := resultMap["message_id"].(float64); ok {
+			giveaway.MsgID = int64(messageID)
 		}
 	}
 
@@ -428,6 +435,7 @@ func (s *giveawayService) toResponse(ctx context.Context, giveaway *models.Givea
 		Prizes:            giveaway.Prizes,
 		AutoDistribute:    giveaway.AutoDistribute,
 		AllowTickets:      giveaway.AllowTickets,
+		MsgID:             giveaway.MsgID,
 	}
 
 	// Получаем победителей для завершенных розыгрышей

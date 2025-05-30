@@ -158,7 +158,7 @@ func (c *Client) NotifyWinner(userID int64, giveaway *models.Giveaway, place int
 
 	c.logger.Printf("Notification message: %s", message)
 
-	err := c.sendMessage(userID, message)
+	_, err := c.sendMessage(userID, message)
 	if err != nil {
 		c.logger.Printf("Failed to send notification to winner %d: %v", userID, err)
 		return err
@@ -168,7 +168,7 @@ func (c *Client) NotifyWinner(userID int64, giveaway *models.Giveaway, place int
 	return nil
 }
 
-func (c *Client) NotifyCreator(userID int64, giveaway *models.Giveaway) error {
+func (c *Client) NotifyCreator(userID int64, giveaway *models.Giveaway) (*apiResponse, error) {
 	c.logger.Printf("Sending notification to creator %d for giveaway %s", userID, giveaway.ID)
 
 	message := fmt.Sprintf(
@@ -189,14 +189,14 @@ func (c *Client) NotifyCreator(userID int64, giveaway *models.Giveaway) error {
 		message += fmt.Sprintf("\n👥 Максимум участников: %d", giveaway.MaxParticipants)
 	}
 
-	err := c.sendMessage(userID, message)
+	response, err := c.sendMessage(userID, message)
 	if err != nil {
 		c.logger.Printf("Failed to send notification to creator %d: %v", userID, err)
-		return err
+		return nil, err
 	}
 
 	c.logger.Printf("Successfully sent notification to creator %d", userID)
-	return nil
+	return response, nil
 }
 
 // Вспомогательные методы
@@ -320,7 +320,7 @@ func (c *Client) checkBoostLevel(ctx context.Context, userID, chatID int64) (int
 	return result.Result.Level, nil
 }
 
-func (c *Client) sendMessage(chatID int64, text string) error {
+func (c *Client) sendMessage(chatID int64, text string) (*apiResponse, error) {
 	c.logger.Printf("Sending message to chat %d", chatID)
 
 	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", c.token)
@@ -333,11 +333,11 @@ func (c *Client) sendMessage(chatID int64, text string) error {
 	err := c.makeRequest("POST", endpoint, params, &response)
 	if err != nil {
 		c.logger.Printf("Failed to send message to chat %d: %v", chatID, err)
-		return err
+		return nil, err
 	}
 
 	c.logger.Printf("Successfully sent message to chat %d", chatID)
-	return nil
+	return &response, nil
 }
 
 func (c *Client) makeRequest(method, endpoint string, params url.Values, result interface{}) error {

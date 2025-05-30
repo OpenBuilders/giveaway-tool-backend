@@ -42,6 +42,7 @@ type Giveaway struct {
 	AutoDistribute  bool           `json:"auto_distribute,omitempty"` // Automatic prize distribution
 	AllowTickets    bool           `json:"allow_tickets"`             // Whether tickets are allowed
 	Requirements    *Requirements  `json:"requirements,omitempty"`    // Participation requirements
+	MsgID           int64          `json:"msg_id"`
 }
 
 // Winner represents a giveaway winner
@@ -89,6 +90,7 @@ type GiveawayResponse struct {
 	AutoDistribute    bool           `json:"auto_distribute,omitempty"`
 	Winners           []Winner       `json:"winners,omitempty"` // Только для завершенных розыгрышей
 	AllowTickets      bool           `json:"allow_tickets"`     // Разрешены ли билеты
+	MsgID             int64          `json:"msg_id"`
 }
 
 // GiveawayDetailedResponse represents detailed information about a giveaway
