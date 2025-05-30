@@ -9,7 +9,7 @@ import (
 	giveawayhttp "giveaway-tool-backend/internal/features/giveaway/delivery/http"
 	giveawayredis "giveaway-tool-backend/internal/features/giveaway/repository/redis"
 	giveawayservice "giveaway-tool-backend/internal/features/giveaway/service"
-	tonproofhttp "giveaway-tool-backend/internal/features/tonproof/handler/http"
+	// tonproofhttp "giveaway-tool-backend/internal/features/tonproof/handler/http"
 	tonproofredis "giveaway-tool-backend/internal/features/tonproof/repository/redis"
 	tonproofservice "giveaway-tool-backend/internal/features/tonproof/service"
 	userhttp "giveaway-tool-backend/internal/features/user/delivery/http"
@@ -112,7 +112,7 @@ func main() {
 	// Initialize HTTP handlers
 	userHandler := userhttp.NewUserHandler(userSvc)
 	giveawayHandler := giveawayhttp.NewGiveawayHandler(giveawaySvc)
-	tonProofHandler := tonproofhttp.NewHandler(tonProofSvc)
+	// tonProofHandler := tonproofhttp.NewHandler(tonProofSvc)
 
 	// Initialize Gin router
 	if !cfg.Debug {
@@ -142,7 +142,7 @@ func main() {
 	{
 		userHandler.RegisterRoutes(v1)
 		giveawayHandler.RegisterRoutes(v1)
-		tonProofHandler.RegisterRoutes(v1)
+		// tonProofHandler.RegisterRoutes(v1)
 	}
 
 	// Create HTTP server
