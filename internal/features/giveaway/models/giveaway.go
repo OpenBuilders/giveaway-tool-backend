@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -41,8 +42,36 @@ type Giveaway struct {
 	Prizes          []PrizePlace   `json:"prizes,omitempty"`
 	AutoDistribute  bool           `json:"auto_distribute,omitempty"` // Automatic prize distribution
 	AllowTickets    bool           `json:"allow_tickets"`             // Whether tickets are allowed
-	Requirements    []Requirement  `json:"requirements,omitempty"`    // Participation requirements
+	Requirements    []Requirement  `json:"requirements"`              // Participation requirements
 	MsgID           int64          `json:"msg_id"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler
+func (g *Giveaway) UnmarshalJSON(data []byte) error {
+	type Alias Giveaway
+	aux := &struct {
+		*Alias
+		Requirements []Requirement `json:"requirements"`
+	}{
+		Alias: (*Alias)(g),
+	}
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	g.Requirements = aux.Requirements
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler
+func (g *Giveaway) MarshalJSON() ([]byte, error) {
+	type Alias Giveaway
+	return json.Marshal(&struct {
+		*Alias
+		Requirements []Requirement `json:"requirements,omitempty"`
+	}{
+		Alias:        (*Alias)(g),
+		Requirements: g.Requirements,
+	})
 }
 
 // Winner represents a giveaway winner
@@ -87,11 +116,39 @@ type GiveawayResponse struct {
 	CanEdit           bool           `json:"can_edit"`
 	UserRole          string         `json:"user_role"` // owner, participant, user
 	Prizes            []PrizePlace   `json:"prizes,omitempty"`
-	Requirements      []Requirement  `json:"requirements,omitempty"`
+	Requirements      []Requirement  `json:"requirements"`
 	AutoDistribute    bool           `json:"auto_distribute,omitempty"`
 	Winners           []Winner       `json:"winners,omitempty"` // Только для завершенных розыгрышей
 	AllowTickets      bool           `json:"allow_tickets"`     // Разрешены ли билеты
 	MsgID             int64          `json:"msg_id"`
+}
+
+// UnmarshalJSON implements json.Unmarshaler
+func (g *GiveawayResponse) UnmarshalJSON(data []byte) error {
+	type Alias GiveawayResponse
+	aux := &struct {
+		*Alias
+		Requirements []Requirement `json:"requirements"`
+	}{
+		Alias: (*Alias)(g),
+	}
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	g.Requirements = aux.Requirements
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler
+func (g *GiveawayResponse) MarshalJSON() ([]byte, error) {
+	type Alias GiveawayResponse
+	return json.Marshal(&struct {
+		*Alias
+		Requirements []Requirement `json:"requirements,omitempty"`
+	}{
+		Alias:        (*Alias)(g),
+		Requirements: g.Requirements,
+	})
 }
 
 // GiveawayDetailedResponse represents detailed information about a giveaway
