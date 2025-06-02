@@ -76,18 +76,19 @@ func (s *giveawayService) Create(ctx context.Context, userID int64, input *model
 	}
 
 	// Проверяем требования, если они включены
-	if input.Requirements != nil && input.Requirements.Enabled {
-		if s.debug {
-			log.Printf("[DEBUG] Validating requirements for new giveaway")
+	if input.Requirements != nil && len(input.Requirements) > 0 {
+		requirements := &models.Requirements{
+			Requirements: input.Requirements,
+			Enabled:      true,
 		}
 
 		// Валидируем структуру требований
-		if err := input.Requirements.Validate(); err != nil {
+		if err := requirements.Validate(); err != nil {
 			return nil, fmt.Errorf("invalid requirements: %v", err)
 		}
 
 		// Проверяем доступность бота в указанных чатах
-		if errors, err := s.telegramClient.ValidateRequirements(input.Requirements); err != nil {
+		if errors, err := s.telegramClient.ValidateRequirements(requirements); err != nil {
 			return nil, fmt.Errorf("failed to validate requirements: %w", err)
 		} else if len(errors) > 0 {
 			return nil, fmt.Errorf("requirements validation failed: %v", errors)
@@ -103,9 +104,14 @@ func (s *giveawayService) Create(ctx context.Context, userID int64, input *model
 		prize := &models.Prize{
 			ID:          uuid.New().String(),
 			Type:        models.PrizeType(input.Prizes[i].PrizeType),
-			Name:        fmt.Sprintf("Prize for place %d", input.Prizes[i].Place),
-			Description: fmt.Sprintf("Prize for place %d in giveaway", input.Prizes[i].Place),
+			Name:        fmt.Sprintf("Prize for place %d", input.Prizes[i].GetPlace()),
+			Description: fmt.Sprintf("Prize for place %d in giveaway", input.Prizes[i].GetPlace()),
 			IsInternal:  true, // По умолчанию считаем призы внутренними
+		}
+
+		if input.Prizes[i].IsAllPlaces() {
+			prize.Name = "Prize for all winners"
+			prize.Description = "Prize for all winners in giveaway"
 		}
 
 		if err := s.repo.CreatePrize(ctx, prize); err != nil {
@@ -113,6 +119,20 @@ func (s *giveawayService) Create(ctx context.Context, userID int64, input *model
 		}
 
 		input.Prizes[i].PrizeID = prize.ID
+	}
+
+	// Если указан один приз для всех мест, создаем копии для каждого места
+	if len(input.Prizes) == 1 && input.Prizes[0].IsAllPlaces() {
+		originalPrize := input.Prizes[0]
+		input.Prizes = make([]models.PrizePlace, input.WinnersCount)
+		for i := 0; i < input.WinnersCount; i++ {
+			input.Prizes[i] = models.PrizePlace{
+				Place:     i + 1,
+				PrizeID:   originalPrize.PrizeID,
+				PrizeType: originalPrize.PrizeType,
+				Fields:    originalPrize.Fields,
+			}
+		}
 	}
 
 	giveaway := &models.Giveaway{
@@ -278,13 +298,18 @@ func (s *giveawayService) Join(ctx context.Context, userID int64, giveawayID str
 	}
 
 	// Проверяем требования для участия
-	if giveaway.Requirements != nil && giveaway.Requirements.Enabled {
+	if giveaway.Requirements != nil && len(giveaway.Requirements) > 0 {
+		requirements := &models.Requirements{
+			Requirements: giveaway.Requirements,
+			Enabled:      true,
+		}
+
 		if s.debug {
 			log.Printf("[DEBUG] Checking requirements for user %d in giveaway %s", userID, giveawayID)
 		}
 
 		// Проверяем требования через Telegram API
-		meetsRequirements, err := s.telegramClient.CheckRequirements(ctx, userID, giveaway.Requirements)
+		meetsRequirements, err := s.telegramClient.CheckRequirements(ctx, userID, requirements)
 		if err != nil {
 			// Если получили ошибку RPS, пропускаем проверку
 			var rpsErr *telegram.RPSError

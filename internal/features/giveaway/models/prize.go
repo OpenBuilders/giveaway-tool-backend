@@ -34,10 +34,32 @@ type Prize struct {
 }
 
 type PrizePlace struct {
-	Place     int                `json:"place" binding:"required,min=1"`
+	Place     interface{}        `json:"place" binding:"required"` // может быть int или строка "all"
 	PrizeID   string             `json:"prize_id"`
 	PrizeType PrizeType          `json:"prize_type" binding:"required"`
 	Fields    []CustomPrizeField `json:"fields,omitempty"`
+}
+
+// IsAllPlaces проверяет, является ли приз общим для всех мест
+func (p *PrizePlace) IsAllPlaces() bool {
+	if str, ok := p.Place.(string); ok {
+		return str == "all"
+	}
+	return false
+}
+
+// GetPlace возвращает номер места или 0 для "all"
+func (p *PrizePlace) GetPlace() int {
+	if p.IsAllPlaces() {
+		return 0
+	}
+	if num, ok := p.Place.(float64); ok {
+		return int(num)
+	}
+	if num, ok := p.Place.(int); ok {
+		return num
+	}
+	return 0
 }
 
 type WinRecord struct {

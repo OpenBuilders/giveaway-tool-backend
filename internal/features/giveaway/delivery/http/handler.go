@@ -101,8 +101,19 @@ func (h *GiveawayHandler) create(c *gin.Context) {
 	}
 
 	for _, prize := range input.Prizes {
-		if prize.Place < 1 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "prize place must be greater than 0"})
+		// Проверяем place
+		if str, ok := prize.Place.(string); ok {
+			if str != "all" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "if place is string, it must be 'all'"})
+				return
+			}
+		} else if num, ok := prize.Place.(float64); ok {
+			if num < 1 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "prize place must be greater than 0"})
+				return
+			}
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "place must be either number > 0 or string 'all'"})
 			return
 		}
 
@@ -164,7 +175,7 @@ func (h *GiveawayHandler) create(c *gin.Context) {
 
 	// Handle requirements if present
 	if len(input.Requirements) > 0 {
-		modelInput.Requirements = &input.Requirements[0]
+		modelInput.Requirements = input.Requirements[0].Requirements
 	}
 
 	giveaway, err := h.service.Create(c.Request.Context(), userData.ID, &modelInput)
