@@ -6,8 +6,10 @@ import (
 	"giveaway-tool-backend/internal/features/giveaway/models/dto"
 	"giveaway-tool-backend/internal/features/giveaway/service"
 	"giveaway-tool-backend/internal/platform/telegram"
+	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -57,6 +59,7 @@ func (h *GiveawayHandler) RegisterRoutes(router *gin.RouterGroup) {
 		giveaways.GET("/me/all", h.getAllMyGiveaways)
 		giveaways.POST("/:id/cancel", h.cancelGiveaway)
 		giveaways.POST("/:id/recreate", h.recreateGiveaway)
+		giveaways.POST("/parse-ids", h.parseIDsFile)
 	}
 
 	prizes := router.Group("/prizes")
@@ -951,4 +954,97 @@ func (h *GiveawayHandler) recreateGiveaway(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, giveaway)
+}
+
+// @Summary Парсинг файла с ID
+// @Description Принимает txt файл с ID (через запятую или новую строку) и возвращает обработанный список
+// @Tags giveaways
+// @Accept multipart/form-data
+// @Produce json
+// @Security TelegramInitData
+// @Param file formData file true "Текстовый файл с ID"
+// @Success 200 {object} models.ParseIDsResponse
+// @Failure 400 {object} models.ErrorResponse "Ошибка в формате файла"
+// @Failure 401 {object} models.ErrorResponse "Не авторизован"
+// @Failure 500 {object} models.ErrorResponse "Внутренняя ошибка сервера"
+// @Router /giveaways/parse-ids [post]
+func (h *GiveawayHandler) parseIDsFile(c *gin.Context) {
+	// Проверяем аутентификацию
+	_, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	// Получаем файл из запроса
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file is required"})
+		return
+	}
+
+	// Проверяем расширение файла
+	if !strings.HasSuffix(strings.ToLower(file.Filename), ".txt") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "only .txt files are allowed"})
+		return
+	}
+
+	// Открываем файл
+	src, err := file.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to open file"})
+		return
+	}
+	defer src.Close()
+
+	// Читаем содержимое файла
+	content, err := io.ReadAll(src)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read file"})
+		return
+	}
+
+	// Обрабатываем содержимое
+	text := string(content)
+
+	// Сначала разбиваем по переносу строки
+	lines := strings.Split(text, "\n")
+
+	// Создаем множество для уникальных ID
+	uniqueIDs := make(map[string]bool)
+
+	// Обрабатываем каждую строку
+	for _, line := range lines {
+		// Убираем пробелы в начале и конце
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// Разбиваем строку по запятым
+		ids := strings.Split(line, ",")
+		for _, id := range ids {
+			// Убираем пробелы для каждого ID
+			id = strings.TrimSpace(id)
+			if id != "" {
+				uniqueIDs[id] = true
+			}
+		}
+	}
+
+	// Преобразуем множество в слайс
+	result := make([]string, 0, len(uniqueIDs))
+	for id := range uniqueIDs {
+		result = append(result, id)
+	}
+
+	// Сортируем результат для стабильного вывода
+	sort.Strings(result)
+
+	response := models.ParseIDsResponse{
+		TotalIDs: len(result),
+		IDs:      result,
+	}
+
+	c.JSON(http.StatusOK, response)
 }
