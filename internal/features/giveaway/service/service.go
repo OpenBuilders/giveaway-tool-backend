@@ -626,7 +626,7 @@ func (s *giveawayService) toDetailedResponse(ctx context.Context, giveaway *mode
 	// Определяем роль пользователя
 	userRole := "viewer"
 	if giveaway.CreatorID == userID {
-		userRole = "creator"
+		userRole = "owner"
 	} else {
 		isParticipant, err := s.repo.IsParticipant(ctx, giveaway.ID, userID)
 		if err != nil {
@@ -702,7 +702,7 @@ func (s *giveawayService) toDetailedResponse(ctx context.Context, giveaway *mode
 		Title:             giveaway.Title,
 		Description:       giveaway.Description,
 		StartedAt:         giveaway.StartedAt,
-		EndedAt:           giveaway.StartedAt.Add(time.Duration(giveaway.Duration) * time.Second),
+		EndsAt:            giveaway.StartedAt.Add(time.Duration(giveaway.Duration) * time.Second),
 		Duration:          giveaway.Duration,
 		MaxParticipants:   giveaway.MaxParticipants,
 		ParticipantsCount: participantsCount,

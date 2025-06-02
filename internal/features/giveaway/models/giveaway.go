@@ -287,7 +287,7 @@ type GiveawayDetailedResponse struct {
 	Title             string         `json:"title"`
 	Description       string         `json:"description"`
 	StartedAt         time.Time      `json:"started_at"`
-	EndedAt           time.Time      `json:"ended_at"`
+	EndsAt            time.Time      `json:"ends_at"`
 	Duration          int64          `json:"duration"` // in seconds
 	MaxParticipants   int            `json:"max_participants"`
 	ParticipantsCount int64          `json:"participants_count"`
@@ -297,7 +297,7 @@ type GiveawayDetailedResponse struct {
 	UpdatedAt         time.Time      `json:"updated_at"`
 	Winners           []WinnerDetail `json:"winners,omitempty"`
 	Prizes            []PrizeDetail  `json:"prizes"`
-	UserRole          string         `json:"user_role"`     // creator, participant, winner
+	UserRole          string         `json:"user_role"`     // owner, participant, winner
 	UserTickets       int            `json:"user_tickets"`  // количество билетов пользователя
 	TotalTickets      int            `json:"total_tickets"` // общее количество билетов
 }
