@@ -88,16 +88,16 @@ func (r *redisRepository) Create(ctx context.Context, giveaway *models.Giveaway)
 
 func (r *redisRepository) GetByID(ctx context.Context, id string) (*models.Giveaway, error) {
 	data, err := r.client.Get(ctx, makeGiveawayKey(id)).Bytes()
-	if err == redis.Nil {
-		return nil, repository.ErrGiveawayNotFound
-	}
 	if err != nil {
-		return nil, err
+		if err == redis.Nil {
+			return nil, repository.ErrGiveawayNotFound
+		}
+		return nil, fmt.Errorf("failed to get giveaway: %w", err)
 	}
 
 	var giveaway models.Giveaway
 	if err := json.Unmarshal(data, &giveaway); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to unmarshal giveaway: %w", err)
 	}
 
 	return &giveaway, nil
@@ -960,7 +960,7 @@ func (r *redisRepository) UpdateStatusAtomic(ctx context.Context, tx repository.
 	// Обновляем статус в основных данных
 	data, err := json.Marshal(giveaway)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal giveaway: %w", err)
 	}
 	redisTx.pipe.Set(ctx, makeGiveawayKey(id), data, 0)
 
@@ -974,14 +974,18 @@ func (r *redisRepository) UpdateStatusAtomic(ctx context.Context, tx repository.
 		redisTx.pipe.SRem(ctx, keyActiveGiveaways, id)
 		redisTx.pipe.SAdd(ctx, keyPendingGiveaways, id)
 		redisTx.pipe.SRem(ctx, keyHistoryGiveaways, id)
-	case models.GiveawayStatusCompleted, models.GiveawayStatusHistory:
+	case models.GiveawayStatusCompleted:
+		redisTx.pipe.SRem(ctx, keyActiveGiveaways, id)
+		redisTx.pipe.SRem(ctx, keyPendingGiveaways, id)
+		redisTx.pipe.SAdd(ctx, keyHistoryGiveaways, id)
+	case models.GiveawayStatusHistory:
 		redisTx.pipe.SRem(ctx, keyActiveGiveaways, id)
 		redisTx.pipe.SRem(ctx, keyPendingGiveaways, id)
 		redisTx.pipe.SAdd(ctx, keyHistoryGiveaways, id)
 	case models.GiveawayStatusCancelled:
 		redisTx.pipe.SRem(ctx, keyActiveGiveaways, id)
 		redisTx.pipe.SRem(ctx, keyPendingGiveaways, id)
-		redisTx.pipe.SRem(ctx, keyHistoryGiveaways, id)
+		redisTx.pipe.SAdd(ctx, keyHistoryGiveaways, id)
 	}
 
 	return nil
