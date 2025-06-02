@@ -55,6 +55,8 @@ func (h *GiveawayHandler) RegisterRoutes(router *gin.RouterGroup) {
 		giveaways.GET("/me/participated", h.getParticipatedGiveaways)
 		giveaways.GET("/me/participation/history", h.getParticipationHistory)
 		giveaways.GET("/me/all", h.getAllMyGiveaways)
+		giveaways.POST("/:id/cancel", h.cancelGiveaway)
+		giveaways.POST("/:id/recreate", h.recreateGiveaway)
 	}
 
 	prizes := router.Group("/prizes")
@@ -873,4 +875,80 @@ func (h *GiveawayHandler) getAllMyGiveaways(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, giveaways)
+}
+
+// @Summary Отменить розыгрыш
+// @Description Отменяет активный розыгрыш. Возможно только если розыгрыш не старше 5 минут и имеет не более 10 участников.
+// @Tags giveaways
+// @Accept json
+// @Produce json
+// @Security TelegramInitData
+// @Param id path string true "ID розыгрыша"
+// @Success 200 {object} models.SuccessResponse "Розыгрыш успешно отменен"
+// @Failure 400 {object} models.ErrorResponse "Невозможно отменить розыгрыш"
+// @Failure 401 {object} models.ErrorResponse "Не авторизован"
+// @Failure 403 {object} models.ErrorResponse "Нет прав на отмену"
+// @Failure 404 {object} models.ErrorResponse "Розыгрыш не найден"
+// @Failure 500 {object} models.ErrorResponse "Внутренняя ошибка сервера"
+// @Router /giveaways/{id}/cancel [post]
+func (h *GiveawayHandler) cancelGiveaway(c *gin.Context) {
+	user, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	userData := user.(initdata.User)
+
+	err := h.service.CancelGiveaway(c.Request.Context(), userData.ID, c.Param("id"))
+	if err != nil {
+		switch err {
+		case service.ErrNotFound:
+			c.JSON(http.StatusNotFound, gin.H{"error": "giveaway not found"})
+		case service.ErrNotOwner:
+			c.JSON(http.StatusForbidden, gin.H{"error": "you are not the owner of this giveaway"})
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		}
+		return
+	}
+
+	c.Status(http.StatusOK)
+}
+
+// @Summary Пересоздать розыгрыш
+// @Description Создает новый розыгрыш на основе существующего отмененного розыгрыша
+// @Tags giveaways
+// @Accept json
+// @Produce json
+// @Security TelegramInitData
+// @Param id path string true "ID розыгрыша"
+// @Success 200 {object} models.GiveawayResponse "Новый розыгрыш"
+// @Failure 400 {object} models.ErrorResponse "Невозможно пересоздать розыгрыш"
+// @Failure 401 {object} models.ErrorResponse "Не авторизован"
+// @Failure 403 {object} models.ErrorResponse "Нет прав на пересоздание"
+// @Failure 404 {object} models.ErrorResponse "Розыгрыш не найден"
+// @Failure 500 {object} models.ErrorResponse "Внутренняя ошибка сервера"
+// @Router /giveaways/{id}/recreate [post]
+func (h *GiveawayHandler) recreateGiveaway(c *gin.Context) {
+	user, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	userData := user.(initdata.User)
+
+	giveaway, err := h.service.RecreateGiveaway(c.Request.Context(), userData.ID, c.Param("id"))
+	if err != nil {
+		switch err {
+		case service.ErrNotFound:
+			c.JSON(http.StatusNotFound, gin.H{"error": "giveaway not found"})
+		case service.ErrNotOwner:
+			c.JSON(http.StatusForbidden, gin.H{"error": "you are not the owner of this giveaway"})
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, giveaway)
 }

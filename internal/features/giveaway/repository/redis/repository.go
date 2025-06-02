@@ -1149,3 +1149,51 @@ func (r *redisRepository) UpdateStatusIfPending(ctx context.Context, id string, 
 
 	return true, nil
 }
+
+func (r *redisRepository) CancelGiveaway(ctx context.Context, giveawayID string) error {
+	// Получаем гивевей
+	giveaway, err := r.GetByID(ctx, giveawayID)
+	if err != nil {
+		return err
+	}
+
+	// Проверяем условия для отмены
+	participantsCount, err := r.GetParticipantsCount(ctx, giveawayID)
+	if err != nil {
+		return fmt.Errorf("failed to get participants count: %w", err)
+	}
+
+	if participantsCount > models.MaxParticipantsForCancel {
+		return fmt.Errorf("cannot cancel giveaway with more than %d participants", models.MaxParticipantsForCancel)
+	}
+
+	timeSinceCreation := time.Since(giveaway.CreatedAt)
+	if timeSinceCreation.Minutes() > float64(models.MaxCancellationTimeMinutes) {
+		return fmt.Errorf("cannot cancel giveaway older than %d minutes", models.MaxCancellationTimeMinutes)
+	}
+
+	// Начинаем транзакцию
+	tx := r.client.TxPipeline()
+
+	// Обновляем статус
+	giveaway.Status = models.GiveawayStatusCancelled
+	giveaway.UpdatedAt = time.Now()
+
+	data, err := json.Marshal(giveaway)
+	if err != nil {
+		return err
+	}
+
+	// Обновляем основные данные
+	tx.Set(ctx, makeGiveawayKey(giveawayID), data, 0)
+
+	// Удаляем из множества активных
+	tx.SRem(ctx, keyActiveGiveaways, giveawayID)
+
+	// Добавляем в множество исторических
+	tx.SAdd(ctx, keyHistoryGiveaways, giveawayID)
+
+	// Выполняем транзакцию
+	_, err = tx.Exec(ctx)
+	return err
+}

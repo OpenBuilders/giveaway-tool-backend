@@ -40,6 +40,8 @@ type GiveawayService interface {
 	GetTopGiveaways(ctx context.Context, limit int) ([]*models.GiveawayResponse, error)
 	GetRequirementTemplates(ctx context.Context) ([]*models.RequirementTemplate, error)
 	GetAllCreatedGiveaways(ctx context.Context, userID int64) ([]*models.GiveawayDetailedResponse, error)
+	CancelGiveaway(ctx context.Context, userID int64, giveawayID string) error
+	RecreateGiveaway(ctx context.Context, userID int64, giveawayID string) (*models.GiveawayResponse, error)
 }
 
 type giveawayService struct {
@@ -794,4 +796,76 @@ func (s *giveawayService) GetAllCreatedGiveaways(ctx context.Context, userID int
 	}
 
 	return s.toDetailedResponses(ctx, giveaways, userID)
+}
+
+func (s *giveawayService) CancelGiveaway(ctx context.Context, userID int64, giveawayID string) error {
+	giveaway, err := s.repo.GetByID(ctx, giveawayID)
+	if err != nil {
+		return ErrNotFound
+	}
+
+	if giveaway.CreatorID != userID {
+		return ErrNotOwner
+	}
+
+	if giveaway.Status != models.GiveawayStatusActive {
+		return errors.New("only active giveaways can be cancelled")
+	}
+
+	return s.repo.CancelGiveaway(ctx, giveawayID)
+}
+
+func (s *giveawayService) RecreateGiveaway(ctx context.Context, userID int64, giveawayID string) (*models.GiveawayResponse, error) {
+	giveaway, err := s.repo.GetByID(ctx, giveawayID)
+	if err != nil {
+		return nil, ErrNotFound
+	}
+
+	if giveaway.CreatorID != userID {
+		return nil, ErrNotOwner
+	}
+
+	if giveaway.Status != models.GiveawayStatusCompleted {
+		return nil, errors.New("only completed giveaways can be recreated")
+	}
+
+	// Создаем новый розыгрыш с теми же параметрами
+	newGiveaway := &models.Giveaway{
+		ID:              uuid.New().String(),
+		CreatorID:       userID,
+		Title:           giveaway.Title,
+		Description:     giveaway.Description,
+		StartedAt:       time.Now(),
+		Duration:        giveaway.Duration,
+		MaxParticipants: giveaway.MaxParticipants,
+		WinnersCount:    giveaway.WinnersCount,
+		Status:          models.GiveawayStatusActive,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+		Prizes:          giveaway.Prizes,
+		AutoDistribute:  giveaway.AutoDistribute,
+		AllowTickets:    giveaway.AllowTickets,
+		Requirements:    giveaway.Requirements,
+		MsgID:           0,
+	}
+
+	if err := s.repo.Create(ctx, newGiveaway); err != nil {
+		return nil, err
+	}
+
+	// Declare resp outside the if statement scope
+	resp, err := s.telegramClient.NotifyCreator(userID, newGiveaway)
+	if err != nil {
+		if s.debug {
+			log.Printf("[DEBUG] Failed to send notification to creator: %v", err)
+		}
+	}
+
+	if resultMap, ok := resp.Result.(map[string]interface{}); ok {
+		if messageID, ok := resultMap["message_id"].(float64); ok {
+			newGiveaway.MsgID = int64(messageID)
+		}
+	}
+
+	return s.toResponse(ctx, newGiveaway)
 }

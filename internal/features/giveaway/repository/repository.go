@@ -93,4 +93,6 @@ type GiveawayRepository interface {
 	GetExpiredGiveaways(ctx context.Context, now int64) ([]string, error)
 
 	GetTopGiveaways(ctx context.Context, limit int) ([]*models.Giveaway, error)
+
+	CancelGiveaway(ctx context.Context, giveawayID string) error
 }

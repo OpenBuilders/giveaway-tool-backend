@@ -162,8 +162,10 @@ func (g *Giveaway) CanAddParticipant() bool {
 }
 
 const (
-	MinDurationDebug   int64 = 5   // 5 seconds for debug mode
-	MinDurationRelease int64 = 300 // 5 minutes for release mode
+	MinDurationDebug           int64 = 5   // 5 seconds for debug mode
+	MinDurationRelease         int64 = 300 // 5 minutes for release mode
+	MaxCancellationTimeMinutes       = 5   // Максимальное время для отмены гивевея в минутах
+	MaxParticipantsForCancel         = 10  // Максимальное количество участников для отмены
 )
 
 // GiveawayStatusUpdate represents a giveaway status update
