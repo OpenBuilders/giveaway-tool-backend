@@ -54,6 +54,7 @@ func (h *GiveawayHandler) RegisterRoutes(router *gin.RouterGroup) {
 		giveaways.GET("/me/history", h.getMyGiveawaysHistory)
 		giveaways.GET("/me/participated", h.getParticipatedGiveaways)
 		giveaways.GET("/me/participation/history", h.getParticipationHistory)
+		giveaways.GET("/me/all", h.getAllMyGiveaways)
 	}
 
 	prizes := router.Group("/prizes")
@@ -175,7 +176,7 @@ func (h *GiveawayHandler) create(c *gin.Context) {
 
 	// Handle requirements if present
 	if len(input.Requirements) > 0 {
-		modelInput.Requirements = input.Requirements[0].Requirements
+		modelInput.Requirements = input.Requirements
 	}
 
 	giveaway, err := h.service.Create(c.Request.Context(), userData.ID, &modelInput)
@@ -839,6 +840,33 @@ func (h *GiveawayHandler) getTopGiveaways(c *gin.Context) {
 
 	// Get top giveaways
 	giveaways, err := h.service.GetTopGiveaways(c.Request.Context(), limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, giveaways)
+}
+
+// @Summary Получить все мои розыгрыши
+// @Description Возвращает список всех розыгрышей, созданных пользователем (активные и исторические)
+// @Tags giveaways
+// @Accept json
+// @Produce json
+// @Security TelegramInitData
+// @Success 200 {array} models.SwaggerGiveawayDetailedResponse "Список всех розыгрышей"
+// @Failure 401 {object} models.ErrorResponse "Не авторизован"
+// @Failure 500 {object} models.ErrorResponse "Внутренняя ошибка сервера"
+// @Router /giveaways/me/all [get]
+func (h *GiveawayHandler) getAllMyGiveaways(c *gin.Context) {
+	user, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	userData := user.(initdata.User)
+
+	giveaways, err := h.service.GetAllCreatedGiveaways(c.Request.Context(), userData.ID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

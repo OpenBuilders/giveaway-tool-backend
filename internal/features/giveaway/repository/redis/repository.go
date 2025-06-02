@@ -480,35 +480,51 @@ func (r *redisRepository) DeletePrizes(ctx context.Context, id string) error {
 func (r *redisRepository) GetByCreatorAndStatus(ctx context.Context, userID int64, statuses []models.GiveawayStatus) ([]*models.Giveaway, error) {
 	var result []*models.Giveaway
 
-	for _, status := range statuses {
-		var key string
-		switch status {
-		case models.GiveawayStatusActive:
-			key = keyActiveGiveaways
-		case models.GiveawayStatusPending:
-			key = keyPendingGiveaways
-		case models.GiveawayStatusCompleted:
-			key = keyHistoryGiveaways
-		default:
-			continue
-		}
+	// Получаем все гивевеи из всех множеств
+	allIds := make(map[string]bool)
 
-		ids, err := r.client.SMembers(ctx, key).Result()
+	// Собираем ID из всех множеств
+	activeIds, err := r.client.SMembers(ctx, keyActiveGiveaways).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get active giveaway ids: %w", err)
+	}
+	for _, id := range activeIds {
+		allIds[id] = true
+	}
+
+	pendingIds, err := r.client.SMembers(ctx, keyPendingGiveaways).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pending giveaway ids: %w", err)
+	}
+	for _, id := range pendingIds {
+		allIds[id] = true
+	}
+
+	historyIds, err := r.client.SMembers(ctx, keyHistoryGiveaways).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get history giveaway ids: %w", err)
+	}
+	for _, id := range historyIds {
+		allIds[id] = true
+	}
+
+	// Проверяем каждый гивевей
+	for id := range allIds {
+		giveaway, err := r.GetByID(ctx, id)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get giveaway ids: %w", err)
+			if err == repository.ErrGiveawayNotFound {
+				continue
+			}
+			return nil, fmt.Errorf("failed to get giveaway %s: %w", id, err)
 		}
 
-		for _, id := range ids {
-			giveaway, err := r.GetByID(ctx, id)
-			if err != nil {
-				if err == repository.ErrGiveawayNotFound {
-					continue
+		// Проверяем принадлежность пользователю и статус
+		if giveaway.CreatorID == userID {
+			for _, status := range statuses {
+				if giveaway.Status == status {
+					result = append(result, giveaway)
+					break
 				}
-				return nil, fmt.Errorf("failed to get giveaway %s: %w", id, err)
-			}
-
-			if giveaway.CreatorID == userID {
-				result = append(result, giveaway)
 			}
 		}
 	}
@@ -519,39 +535,56 @@ func (r *redisRepository) GetByCreatorAndStatus(ctx context.Context, userID int6
 func (r *redisRepository) GetByParticipantAndStatus(ctx context.Context, userID int64, statuses []models.GiveawayStatus) ([]*models.Giveaway, error) {
 	var result []*models.Giveaway
 
-	for _, status := range statuses {
-		var key string
-		switch status {
-		case models.GiveawayStatusActive:
-			key = keyActiveGiveaways
-		case models.GiveawayStatusPending:
-			key = keyPendingGiveaways
-		case models.GiveawayStatusCompleted:
-			key = keyHistoryGiveaways
-		default:
-			continue
-		}
+	// Получаем все гивевеи из всех множеств
+	allIds := make(map[string]bool)
 
-		ids, err := r.client.SMembers(ctx, key).Result()
+	// Собираем ID из всех множеств
+	activeIds, err := r.client.SMembers(ctx, keyActiveGiveaways).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get active giveaway ids: %w", err)
+	}
+	for _, id := range activeIds {
+		allIds[id] = true
+	}
+
+	pendingIds, err := r.client.SMembers(ctx, keyPendingGiveaways).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pending giveaway ids: %w", err)
+	}
+	for _, id := range pendingIds {
+		allIds[id] = true
+	}
+
+	historyIds, err := r.client.SMembers(ctx, keyHistoryGiveaways).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get history giveaway ids: %w", err)
+	}
+	for _, id := range historyIds {
+		allIds[id] = true
+	}
+
+	// Проверяем каждый гивевей
+	for id := range allIds {
+		isParticipant, err := r.IsParticipant(ctx, id, userID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get giveaway ids: %w", err)
+			return nil, fmt.Errorf("failed to check participant status: %w", err)
 		}
 
-		for _, id := range ids {
-			isParticipant, err := r.IsParticipant(ctx, id, userID)
+		if isParticipant {
+			giveaway, err := r.GetByID(ctx, id)
 			if err != nil {
-				return nil, fmt.Errorf("failed to check participant status: %w", err)
+				if err == repository.ErrGiveawayNotFound {
+					continue
+				}
+				return nil, fmt.Errorf("failed to get giveaway %s: %w", id, err)
 			}
 
-			if isParticipant {
-				giveaway, err := r.GetByID(ctx, id)
-				if err != nil {
-					if err == repository.ErrGiveawayNotFound {
-						continue
-					}
-					return nil, fmt.Errorf("failed to get giveaway %s: %w", id, err)
+			// Проверяем статус
+			for _, status := range statuses {
+				if giveaway.Status == status {
+					result = append(result, giveaway)
+					break
 				}
-				result = append(result, giveaway)
 			}
 		}
 	}
@@ -945,6 +978,10 @@ func (r *redisRepository) UpdateStatusAtomic(ctx context.Context, tx repository.
 		redisTx.pipe.SRem(ctx, keyActiveGiveaways, id)
 		redisTx.pipe.SRem(ctx, keyPendingGiveaways, id)
 		redisTx.pipe.SAdd(ctx, keyHistoryGiveaways, id)
+	case models.GiveawayStatusCancelled:
+		redisTx.pipe.SRem(ctx, keyActiveGiveaways, id)
+		redisTx.pipe.SRem(ctx, keyPendingGiveaways, id)
+		redisTx.pipe.SRem(ctx, keyHistoryGiveaways, id)
 	}
 
 	return nil

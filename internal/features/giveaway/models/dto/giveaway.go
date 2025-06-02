@@ -1,22 +1,23 @@
 package dto
 
 import (
-	"github.com/go-playground/validator/v10"
 	"giveaway-tool-backend/internal/features/giveaway/models"
 	"time"
+
+	"github.com/go-playground/validator/v10"
 )
 
 // GiveawayCreateRequest represents the request body for creating a new giveaway
 type GiveawayCreateRequest struct {
-	Title           string                `json:"title" binding:"required,min=3,max=100"`
-	Description     string                `json:"description" binding:"max=1000"`
-	Duration        int64                 `json:"duration" binding:"required,min=5"` // in seconds
-	MaxParticipants int                   `json:"max_participants" binding:"min=0"`  // 0 = unlimited
-	WinnersCount    int                   `json:"winners_count" binding:"required,min=1"`
-	Prizes          []models.PrizePlace   `json:"prizes" binding:"required,dive"`
-	AutoDistribute  bool                  `json:"auto_distribute"`
-	AllowTickets    bool                  `json:"allow_tickets"`
-	Requirements    []models.Requirements `json:"requirements" binding:"dive"`
+	Title           string               `json:"title" binding:"required,min=3,max=100"`
+	Description     string               `json:"description" binding:"max=1000"`
+	Duration        int64                `json:"duration" binding:"required,min=5"` // in seconds
+	MaxParticipants int                  `json:"max_participants" binding:"min=0"`  // 0 = unlimited
+	WinnersCount    int                  `json:"winners_count" binding:"required,min=1"`
+	Prizes          []models.PrizePlace  `json:"prizes" binding:"required,dive"`
+	AutoDistribute  bool                 `json:"auto_distribute"`
+	AllowTickets    bool                 `json:"allow_tickets"`
+	Requirements    []models.Requirement `json:"requirements" binding:"dive"`
 	Validate        validator.FieldLevel
 }
 

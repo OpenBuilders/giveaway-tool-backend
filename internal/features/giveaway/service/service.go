@@ -39,6 +39,7 @@ type GiveawayService interface {
 	GetParticipationHistory(ctx context.Context, userID int64) ([]*models.GiveawayDetailedResponse, error)
 	GetTopGiveaways(ctx context.Context, limit int) ([]*models.GiveawayResponse, error)
 	GetRequirementTemplates(ctx context.Context) ([]*models.RequirementTemplate, error)
+	GetAllCreatedGiveaways(ctx context.Context, userID int64) ([]*models.GiveawayDetailedResponse, error)
 }
 
 type giveawayService struct {
@@ -770,4 +771,27 @@ func (s *giveawayService) GetRequirementTemplates(ctx context.Context) ([]*model
 	}
 
 	return templates, nil
+}
+
+func (s *giveawayService) GetAllCreatedGiveaways(ctx context.Context, userID int64) ([]*models.GiveawayDetailedResponse, error) {
+	if s.debug {
+		log.Printf("[DEBUG] Getting all giveaways for user %d", userID)
+	}
+
+	// Получаем все розыгрыши пользователя (активные, завершенные и исторические)
+	giveaways, err := s.repo.GetByCreatorAndStatus(ctx, userID, []models.GiveawayStatus{
+		models.GiveawayStatusActive,
+		models.GiveawayStatusPending,
+		models.GiveawayStatusCompleted,
+		models.GiveawayStatusHistory,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get giveaways: %w", err)
+	}
+
+	if s.debug {
+		log.Printf("[DEBUG] Found %d giveaways for user %d", len(giveaways), userID)
+	}
+
+	return s.toDetailedResponses(ctx, giveaways, userID)
 }
