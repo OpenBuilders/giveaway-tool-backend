@@ -41,7 +41,7 @@ type Giveaway struct {
 	Prizes          []PrizePlace   `json:"prizes,omitempty"`
 	AutoDistribute  bool           `json:"auto_distribute,omitempty"` // Automatic prize distribution
 	AllowTickets    bool           `json:"allow_tickets"`             // Whether tickets are allowed
-	Requirements    *Requirements  `json:"requirements,omitempty"`    // Participation requirements
+	Requirements    []Requirement  `json:"requirements,omitempty"`    // Participation requirements
 	MsgID           int64          `json:"msg_id"`
 }
 
@@ -62,7 +62,7 @@ type GiveawayCreate struct {
 	Prizes          []PrizePlace  `json:"prizes" binding:"required"`
 	AutoDistribute  bool          `json:"auto_distribute"`
 	AllowTickets    bool          `json:"allow_tickets"`
-	Requirements    *Requirements `json:"requirements"`
+	Requirements    []Requirement `json:"requirements"`
 }
 
 type GiveawayUpdate struct {
@@ -87,6 +87,7 @@ type GiveawayResponse struct {
 	CanEdit           bool           `json:"can_edit"`
 	UserRole          string         `json:"user_role"` // owner, participant, user
 	Prizes            []PrizePlace   `json:"prizes,omitempty"`
+	Requirements      []Requirement  `json:"requirements,omitempty"`
 	AutoDistribute    bool           `json:"auto_distribute,omitempty"`
 	Winners           []Winner       `json:"winners,omitempty"` // Только для завершенных розыгрышей
 	AllowTickets      bool           `json:"allow_tickets"`     // Разрешены ли билеты

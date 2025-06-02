@@ -433,6 +433,7 @@ func (s *giveawayService) toResponse(ctx context.Context, giveaway *models.Givea
 		CanEdit:           giveaway.IsEditable(),
 		UserRole:          "user", // Default role
 		Prizes:            giveaway.Prizes,
+		Requirements:      giveaway.Requirements,
 		AutoDistribute:    giveaway.AutoDistribute,
 		AllowTickets:      giveaway.AllowTickets,
 		MsgID:             giveaway.MsgID,
