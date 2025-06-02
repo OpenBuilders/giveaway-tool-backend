@@ -48,17 +48,78 @@ type Giveaway struct {
 
 // UnmarshalJSON implements json.Unmarshaler
 func (g *Giveaway) UnmarshalJSON(data []byte) error {
-	type Alias Giveaway
-	aux := &struct {
-		*Alias
-		Requirements []Requirement `json:"requirements"`
-	}{
-		Alias: (*Alias)(g),
+	// Сначала пробуем обычную структуру без Requirements
+	type RawGiveaway struct {
+		ID              string         `json:"id"`
+		CreatorID       int64          `json:"creator_id"`
+		Title           string         `json:"title"`
+		Description     string         `json:"description"`
+		StartedAt       time.Time      `json:"started_at"`
+		EndsAt          time.Time      `json:"ends_at"`
+		Duration        int64          `json:"duration"`
+		MaxParticipants int            `json:"max_participants,omitempty"`
+		WinnersCount    int            `json:"winners_count"`
+		Status          GiveawayStatus `json:"status"`
+		CreatedAt       time.Time      `json:"created_at"`
+		UpdatedAt       time.Time      `json:"updated_at"`
+		Prizes          []PrizePlace   `json:"prizes,omitempty"`
+		AutoDistribute  bool           `json:"auto_distribute,omitempty"`
+		AllowTickets    bool           `json:"allow_tickets"`
+		MsgID           int64          `json:"msg_id"`
 	}
-	if err := json.Unmarshal(data, aux); err != nil {
+
+	raw := &RawGiveaway{}
+	if err := json.Unmarshal(data, raw); err != nil {
 		return err
 	}
-	g.Requirements = aux.Requirements
+
+	// Копируем базовые поля
+	g.ID = raw.ID
+	g.CreatorID = raw.CreatorID
+	g.Title = raw.Title
+	g.Description = raw.Description
+	g.StartedAt = raw.StartedAt
+	g.EndsAt = raw.EndsAt
+	g.Duration = raw.Duration
+	g.MaxParticipants = raw.MaxParticipants
+	g.WinnersCount = raw.WinnersCount
+	g.Status = raw.Status
+	g.CreatedAt = raw.CreatedAt
+	g.UpdatedAt = raw.UpdatedAt
+	g.Prizes = raw.Prizes
+	g.AutoDistribute = raw.AutoDistribute
+	g.AllowTickets = raw.AllowTickets
+	g.MsgID = raw.MsgID
+
+	// Теперь пробуем получить requirements из разных возможных форматов
+	var rawMap map[string]json.RawMessage
+	if err := json.Unmarshal(data, &rawMap); err != nil {
+		return err
+	}
+
+	// Проверяем наличие поля requirements
+	if reqData, ok := rawMap["requirements"]; ok {
+		var reqs []Requirement
+		if err := json.Unmarshal(reqData, &reqs); err == nil {
+			g.Requirements = reqs
+		} else {
+			// Если не удалось распарсить как массив, пробуем как объект старого формата
+			var oldReqs struct {
+				Requirements []Requirement `json:"requirements"`
+				Enabled      bool          `json:"enabled"`
+			}
+			if err := json.Unmarshal(reqData, &oldReqs); err == nil {
+				g.Requirements = oldReqs.Requirements
+			} else {
+				// Если и это не удалось, просто оставляем пустой массив
+				g.Requirements = make([]Requirement, 0)
+			}
+		}
+	} else {
+		// Если поля нет вообще, инициализируем пустым массивом
+		g.Requirements = make([]Requirement, 0)
+	}
+
 	return nil
 }
 
@@ -125,17 +186,84 @@ type GiveawayResponse struct {
 
 // UnmarshalJSON implements json.Unmarshaler
 func (g *GiveawayResponse) UnmarshalJSON(data []byte) error {
-	type Alias GiveawayResponse
-	aux := &struct {
-		*Alias
-		Requirements []Requirement `json:"requirements"`
-	}{
-		Alias: (*Alias)(g),
+	// Сначала пробуем обычную структуру без Requirements
+	type RawGiveawayResponse struct {
+		ID                string         `json:"id"`
+		CreatorID         int64          `json:"creator_id"`
+		Title             string         `json:"title"`
+		Description       string         `json:"description"`
+		StartedAt         time.Time      `json:"started_at"`
+		EndsAt            time.Time      `json:"ends_at"`
+		MaxParticipants   int            `json:"max_participants,omitempty"`
+		WinnersCount      int            `json:"winners_count"`
+		Status            GiveawayStatus `json:"status"`
+		CreatedAt         time.Time      `json:"created_at"`
+		UpdatedAt         time.Time      `json:"updated_at"`
+		ParticipantsCount int64          `json:"participants_count"`
+		CanEdit           bool           `json:"can_edit"`
+		UserRole          string         `json:"user_role"`
+		Prizes            []PrizePlace   `json:"prizes,omitempty"`
+		AutoDistribute    bool           `json:"auto_distribute,omitempty"`
+		Winners           []Winner       `json:"winners,omitempty"`
+		AllowTickets      bool           `json:"allow_tickets"`
+		MsgID             int64          `json:"msg_id"`
 	}
-	if err := json.Unmarshal(data, aux); err != nil {
+
+	raw := &RawGiveawayResponse{}
+	if err := json.Unmarshal(data, raw); err != nil {
 		return err
 	}
-	g.Requirements = aux.Requirements
+
+	// Копируем базовые поля
+	g.ID = raw.ID
+	g.CreatorID = raw.CreatorID
+	g.Title = raw.Title
+	g.Description = raw.Description
+	g.StartedAt = raw.StartedAt
+	g.EndsAt = raw.EndsAt
+	g.MaxParticipants = raw.MaxParticipants
+	g.WinnersCount = raw.WinnersCount
+	g.Status = raw.Status
+	g.CreatedAt = raw.CreatedAt
+	g.UpdatedAt = raw.UpdatedAt
+	g.ParticipantsCount = raw.ParticipantsCount
+	g.CanEdit = raw.CanEdit
+	g.UserRole = raw.UserRole
+	g.Prizes = raw.Prizes
+	g.AutoDistribute = raw.AutoDistribute
+	g.Winners = raw.Winners
+	g.AllowTickets = raw.AllowTickets
+	g.MsgID = raw.MsgID
+
+	// Теперь пробуем получить requirements из разных возможных форматов
+	var rawMap map[string]json.RawMessage
+	if err := json.Unmarshal(data, &rawMap); err != nil {
+		return err
+	}
+
+	// Проверяем наличие поля requirements
+	if reqData, ok := rawMap["requirements"]; ok {
+		var reqs []Requirement
+		if err := json.Unmarshal(reqData, &reqs); err == nil {
+			g.Requirements = reqs
+		} else {
+			// Если не удалось распарсить как массив, пробуем как объект старого формата
+			var oldReqs struct {
+				Requirements []Requirement `json:"requirements"`
+				Enabled      bool          `json:"enabled"`
+			}
+			if err := json.Unmarshal(reqData, &oldReqs); err == nil {
+				g.Requirements = oldReqs.Requirements
+			} else {
+				// Если и это не удалось, просто оставляем пустой массив
+				g.Requirements = make([]Requirement, 0)
+			}
+		}
+	} else {
+		// Если поля нет вообще, инициализируем пустым массивом
+		g.Requirements = make([]Requirement, 0)
+	}
+
 	return nil
 }
 
