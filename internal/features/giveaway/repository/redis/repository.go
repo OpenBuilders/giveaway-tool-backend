@@ -14,6 +14,8 @@ import (
 
 	"log"
 
+	"bytes"
+
 	"github.com/redis/go-redis/v9"
 )
 
@@ -96,7 +98,9 @@ func (r *redisRepository) GetByID(ctx context.Context, id string) (*models.Givea
 	}
 
 	var giveaway models.Giveaway
-	if err := json.Unmarshal(data, &giveaway); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(&giveaway); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal giveaway: %w", err)
 	}
 

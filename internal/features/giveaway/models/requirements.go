@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -43,10 +44,10 @@ func ValidateTemplates(templates []RequirementTemplate) error {
 }
 
 type Requirement struct {
-	Name   string `json:"name"`
-	Value  string `json:"value"`
-	Type   string `json:"type"`
-	ChatID string `json:"chat_id"`
+	Name   string      `json:"name"`
+	Value  interface{} `json:"value"`
+	Type   string      `json:"type"`
+	ChatID string      `json:"chat_id"`
 }
 
 func (r *Requirement) Validate() error {
@@ -56,7 +57,7 @@ func (r *Requirement) Validate() error {
 	if r.Type != RequirementTypeSubscription {
 		return fmt.Errorf("invalid requirement type: %s", r.Type)
 	}
-	if r.Value == "" {
+	if r.Value == nil {
 		return fmt.Errorf("requirement value is required")
 	}
 	if r.ChatID == "" {
@@ -122,6 +123,30 @@ func ValidateRequirements(reqs []Requirement) error {
 		if err := req.Validate(); err != nil {
 			return fmt.Errorf("invalid requirement: %w", err)
 		}
+	}
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler
+func (r *Requirement) MarshalJSON() ([]byte, error) {
+	type Alias Requirement
+	return json.Marshal(&struct {
+		*Alias
+	}{
+		Alias: (*Alias)(r),
+	})
+}
+
+// UnmarshalJSON implements json.Unmarshaler
+func (r *Requirement) UnmarshalJSON(data []byte) error {
+	type Alias Requirement
+	aux := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(r),
+	}
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
 	}
 	return nil
 }
