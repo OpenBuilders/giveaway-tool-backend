@@ -7,9 +7,10 @@ import (
 	"strings"
 )
 
-// Requirement types
+// Типы требований
 const (
-	RequirementTypeSubscription = "subscription"
+	RequirementTypeSubscription = "subscription" // Подписка на канал
+	RequirementTypeBoost        = "boost"        // Буст канала
 )
 
 type RequirementTemplate struct {
@@ -25,7 +26,7 @@ func (t *RequirementTemplate) Validate() error {
 	if t.Name == "" {
 		return fmt.Errorf("requirement template name is required")
 	}
-	if t.Type != RequirementTypeSubscription {
+	if t.Type != RequirementTypeSubscription && t.Type != RequirementTypeBoost {
 		return fmt.Errorf("invalid requirement type: %s", t.Type)
 	}
 	return nil
@@ -44,24 +45,24 @@ func ValidateTemplates(templates []RequirementTemplate) error {
 }
 
 type Requirement struct {
-	Name   string      `json:"name"`
-	Value  interface{} `json:"value"`
-	Type   string      `json:"type"`
-	ChatID string      `json:"chat_id"`
+	Name     string `json:"name"`     // Название требования для отображения
+	Type     string `json:"type"`     // Тип требования (subscription/boost)
+	Username string `json:"username"` // Юзернейм канала (например "@channel")
 }
 
 func (r *Requirement) Validate() error {
 	if r.Name == "" {
 		return fmt.Errorf("requirement name is required")
 	}
-	if r.Type != RequirementTypeSubscription {
+	if r.Type != RequirementTypeSubscription && r.Type != RequirementTypeBoost {
 		return fmt.Errorf("invalid requirement type: %s", r.Type)
 	}
-	if r.Value == nil {
-		return fmt.Errorf("requirement value is required")
+	if r.Username == "" {
+		return fmt.Errorf("username is required")
 	}
-	if r.ChatID == "" {
-		return fmt.Errorf("chat_id is required")
+	// Проверяем формат username
+	if !strings.HasPrefix(r.Username, "@") {
+		r.Username = "@" + r.Username
 	}
 	return nil
 }
@@ -79,16 +80,16 @@ type ChatIDInfo struct {
 // Для получения числового ID используйте telegram.Client.GetChatIDByUsername
 func (r *Requirement) GetChatIDInfo() (*ChatIDInfo, error) {
 	info := &ChatIDInfo{
-		RawID: r.ChatID,
+		RawID: r.Username,
 	}
 
-	if strings.HasPrefix(r.ChatID, "@") {
-		info.Username = strings.TrimPrefix(r.ChatID, "@")
+	if strings.HasPrefix(r.Username, "@") {
+		info.Username = strings.TrimPrefix(r.Username, "@")
 		info.IsNumeric = false
 		return info, nil
 	}
 
-	chatID, err := strconv.ParseInt(r.ChatID, 10, 64)
+	chatID, err := strconv.ParseInt(r.Username, 10, 64)
 	if err != nil {
 		return nil, fmt.Errorf("invalid chat_id format: %w", err)
 	}
@@ -166,8 +167,7 @@ const (
 type RequirementCheckResult struct {
 	Name     string                 `json:"name"`                // Название требования
 	Type     string                 `json:"type"`                // Тип требования
-	Value    interface{}            `json:"value"`               // Значение требования
-	ChatID   string                 `json:"chat_id"`             // ID чата/канала
+	Username string                 `json:"username"`            // Username канала
 	Status   RequirementCheckStatus `json:"status"`              // Статус проверки
 	Error    string                 `json:"error,omitempty"`     // Описание ошибки, если есть
 	ChatInfo *ChatInfo              `json:"chat_info,omitempty"` // Информация о чате, если доступна

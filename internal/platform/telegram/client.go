@@ -75,31 +75,31 @@ func (c *Client) ValidateRequirements(requirements *models.Requirements) ([]stri
 	// Проверяем каждое требование
 	for _, req := range requirements.Requirements {
 		// Проверяем доступность бота в чате
-		chat, err := c.GetChat(req.ChatID)
+		chat, err := c.GetChat(req.Username)
 		if err != nil {
-			errors = append(errors, fmt.Sprintf("failed to get chat %s: %v", req.ChatID, err))
+			errors = append(errors, fmt.Sprintf("failed to get chat %s: %v", req.Username, err))
 			continue
 		}
 
 		// Проверяем права бота в чате
 		member, err := c.GetBotChatMember(fmt.Sprintf("%d", chat.ID))
 		if err != nil {
-			errors = append(errors, fmt.Sprintf("failed to get bot member info for chat %s: %v", req.ChatID, err))
+			errors = append(errors, fmt.Sprintf("failed to get bot member info for chat %s: %v", req.Username, err))
 			continue
 		}
 
 		// Проверяем тип требования
 		switch req.Type {
-		case "subscription":
+		case models.RequirementTypeSubscription:
 			// Для подписки достаточно базовых прав
 			if !member.CanInviteUsers {
-				errors = append(errors, fmt.Sprintf("bot doesn't have enough rights in chat %s to check subscriptions", req.ChatID))
+				errors = append(errors, fmt.Sprintf("bot doesn't have enough rights in chat %s to check subscriptions", req.Username))
 			}
 
-		case "boost":
+		case models.RequirementTypeBoost:
 			// Для проверки бустов нужны права администратора
 			if !member.CanInviteUsers || !member.CanRestrictMembers {
-				errors = append(errors, fmt.Sprintf("bot doesn't have enough rights in chat %s to check boosts", req.ChatID))
+				errors = append(errors, fmt.Sprintf("bot doesn't have enough rights in chat %s to check boosts", req.Username))
 			}
 
 		default:
@@ -113,26 +113,9 @@ func (c *Client) ValidateRequirements(requirements *models.Requirements) ([]stri
 // CheckRequirements проверяет выполнение требований пользователем
 func (c *Client) CheckRequirements(ctx context.Context, userID int64, requirements *models.Requirements) (bool, error) {
 	for _, req := range requirements.Requirements {
-		// Получаем информацию о формате ID чата
-		chatInfo, err := req.GetChatIDInfo()
-		if err != nil {
-			return false, fmt.Errorf("invalid chat_id format: %w", err)
-		}
-
-		// Получаем числовой ID через API, если передан юзернейм
-		var numericChatID int64
-		if chatInfo.IsNumeric {
-			numericChatID = chatInfo.NumericID
-		} else {
-			numericChatID, err = c.GetChatIDByUsername(chatInfo.Username)
-			if err != nil {
-				return false, fmt.Errorf("failed to get chat info: %w", err)
-			}
-		}
-
 		switch req.Type {
 		case models.RequirementTypeSubscription:
-			isMember, err := c.checkChatMembership(ctx, userID, numericChatID)
+			isMember, err := c.CheckMembership(ctx, userID, req.Username)
 			if err != nil {
 				// Если получили ошибку RPS, пропускаем проверку
 				var rpsErr *RPSError
@@ -144,8 +127,23 @@ func (c *Client) CheckRequirements(ctx context.Context, userID int64, requiremen
 			if !isMember {
 				return false, nil
 			}
+
+		case models.RequirementTypeBoost:
+			hasBoost, err := c.CheckBoost(ctx, userID, req.Username)
+			if err != nil {
+				// Если получили ошибку RPS, пропускаем проверку
+				var rpsErr *RPSError
+				if ok := errors.As(err, &rpsErr); ok {
+					return true, nil
+				}
+				return false, err
+			}
+			if !hasBoost {
+				return false, nil
+			}
+
 		default:
-			// Handle any other requirement types
+			return false, fmt.Errorf("unknown requirement type: %s", req.Type)
 		}
 	}
 

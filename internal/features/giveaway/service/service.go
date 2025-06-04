@@ -886,15 +886,14 @@ func (s *giveawayService) CheckRequirements(ctx context.Context, userID int64, g
 	// Проверяем каждое требование
 	for i, req := range giveaway.Requirements {
 		result := models.RequirementCheckResult{
-			Name:   req.Name,
-			Type:   req.Type,
-			Value:  req.Value,
-			ChatID: req.ChatID,
-			Status: models.RequirementStatusPending,
+			Name:     req.Name,
+			Type:     req.Type,
+			Username: req.Username,
+			Status:   models.RequirementStatusPending,
 		}
 
 		// Получаем информацию о чате
-		chatInfo, err := s.telegramClient.GetChat(req.ChatID)
+		chatInfo, err := s.telegramClient.GetChat(req.Username)
 		if err == nil {
 			result.ChatInfo = &models.ChatInfo{
 				Title:    chatInfo.Title,
@@ -905,9 +904,9 @@ func (s *giveawayService) CheckRequirements(ctx context.Context, userID int64, g
 
 		// Проверяем требование в зависимости от типа
 		switch req.Type {
-		case "subscription":
+		case models.RequirementTypeSubscription:
 			// Проверяем подписку на канал
-			isMember, err := s.telegramClient.CheckMembership(ctx, userID, req.ChatID)
+			isMember, err := s.telegramClient.CheckMembership(ctx, userID, req.Username)
 			if err != nil {
 				// Если получили ошибку RPS, помечаем как пропущенное
 				var rpsErr *telegram.RPSError
@@ -928,9 +927,9 @@ func (s *giveawayService) CheckRequirements(ctx context.Context, userID int64, g
 				}
 			}
 
-		case "boost":
+		case models.RequirementTypeBoost:
 			// Проверяем буст канала
-			hasBoost, err := s.telegramClient.CheckBoost(ctx, userID, req.ChatID)
+			hasBoost, err := s.telegramClient.CheckBoost(ctx, userID, req.Username)
 			if err != nil {
 				// Если получили ошибку RPS, помечаем как пропущенное
 				var rpsErr *telegram.RPSError
