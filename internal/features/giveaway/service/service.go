@@ -886,7 +886,7 @@ func (s *giveawayService) CheckRequirements(ctx context.Context, userID int64, g
 	// Проверяем каждое требование
 	for i, req := range giveaway.Requirements {
 		result := models.RequirementCheckResult{
-			Name:     req.Name,
+			Name:     req.Name(),
 			Type:     req.Type,
 			Username: req.Username,
 			Status:   models.RequirementStatusPending,

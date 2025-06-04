@@ -13,6 +13,12 @@ const (
 	RequirementTypeBoost        = "boost"        // Буст канала
 )
 
+// Шаблоны названий требований
+const (
+	RequirementNameTemplateSubscription = "Follow %s" // Шаблон для подписки
+	RequirementNameTemplateBoost        = "Boost %s"  // Шаблон для буста
+)
+
 // Статусы проверки требований
 const (
 	RequirementStatusPending = "pending" // Ожидает проверки
@@ -24,16 +30,64 @@ const (
 
 // Requirement представляет требование для участия в розыгрыше
 type Requirement struct {
-	Name     string `json:"name"`     // Название требования для отображения
 	Type     string `json:"type"`     // Тип требования (subscription, boost)
 	Username string `json:"username"` // Username канала (с @ или без)
+	name     string // Внутреннее поле для кэширования сгенерированного имени
+}
+
+// Name возвращает сгенерированное имя требования
+func (r *Requirement) Name() string {
+	if r.name != "" {
+		return r.name
+	}
+
+	username := r.Username
+	if !strings.HasPrefix(username, "@") {
+		username = "@" + username
+	}
+
+	switch r.Type {
+	case RequirementTypeSubscription:
+		r.name = fmt.Sprintf(RequirementNameTemplateSubscription, username)
+	case RequirementTypeBoost:
+		r.name = fmt.Sprintf(RequirementNameTemplateBoost, username)
+	default:
+		r.name = fmt.Sprintf("Unknown requirement for %s", username)
+	}
+
+	return r.name
+}
+
+// MarshalJSON реализует пользовательскую сериализацию в JSON
+func (r *Requirement) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Name     string `json:"name"`
+		Type     string `json:"type"`
+		Username string `json:"username"`
+	}{
+		Name:     r.Name(),
+		Type:     r.Type,
+		Username: r.Username,
+	})
+}
+
+// UnmarshalJSON реализует пользовательскую десериализацию из JSON
+func (r *Requirement) UnmarshalJSON(data []byte) error {
+	aux := struct {
+		Name     string `json:"name"` // Игнорируем name при десериализации
+		Type     string `json:"type"`
+		Username string `json:"username"`
+	}{}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	r.Type = aux.Type
+	r.Username = aux.Username
+	return nil
 }
 
 // Validate проверяет корректность требования
 func (r *Requirement) Validate() error {
-	if r.Name == "" {
-		return fmt.Errorf("requirement name is required")
-	}
 	if r.Type != RequirementTypeSubscription && r.Type != RequirementTypeBoost {
 		return fmt.Errorf("invalid requirement type: %s", r.Type)
 	}
@@ -148,30 +202,6 @@ func ValidateRequirements(reqs []Requirement) error {
 		if err := req.Validate(); err != nil {
 			return fmt.Errorf("invalid requirement: %w", err)
 		}
-	}
-	return nil
-}
-
-// MarshalJSON implements json.Marshaler
-func (r *Requirement) MarshalJSON() ([]byte, error) {
-	type Alias Requirement
-	return json.Marshal(&struct {
-		*Alias
-	}{
-		Alias: (*Alias)(r),
-	})
-}
-
-// UnmarshalJSON implements json.Unmarshaler
-func (r *Requirement) UnmarshalJSON(data []byte) error {
-	type Alias Requirement
-	aux := &struct {
-		*Alias
-	}{
-		Alias: (*Alias)(r),
-	}
-	if err := json.Unmarshal(data, aux); err != nil {
-		return err
 	}
 	return nil
 }
