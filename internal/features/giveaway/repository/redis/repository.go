@@ -49,6 +49,7 @@ const (
 	keyTopGiveaways            = "giveaways:top"
 	defaultLockTimeout         = 30 * time.Second
 	keyProcessingSet           = "giveaways:processing"
+	keyRequirements            = "requirements" // Префикс для ключей требований
 )
 
 func NewRedisGiveawayRepository(client *redis.Client) repository.GiveawayRepository {
@@ -67,6 +68,10 @@ func makePrizeKey(id string) string {
 	return keyPrefixPrize + id
 }
 
+func makeRequirementsKey(giveawayID string) string {
+	return fmt.Sprintf("giveaway:%s:%s", giveawayID, keyRequirements)
+}
+
 func (r *redisRepository) BeginTx(ctx context.Context) (repository.Transaction, error) {
 	return &redisTransaction{
 		pipe: r.client.Pipeline(),
@@ -74,21 +79,37 @@ func (r *redisRepository) BeginTx(ctx context.Context) (repository.Transaction, 
 }
 
 func (r *redisRepository) Create(ctx context.Context, giveaway *models.Giveaway) error {
-	data, err := json.Marshal(giveaway)
+	// Создаем копию гивевея без требований для основного хранения
+	giveawayData := *giveaway
+	giveawayData.Requirements = nil
+
+	data, err := json.Marshal(giveawayData)
 	if err != nil {
 		return fmt.Errorf("failed to marshal giveaway: %w", err)
 	}
 
 	pipe := r.client.Pipeline()
+
+	// Сохраняем основные данные гивевея
 	pipe.Set(ctx, makeGiveawayKey(giveaway.ID), data, 0)
 	pipe.SAdd(ctx, keyActiveGiveaways, giveaway.ID)
 	pipe.Set(ctx, makeParticipantsCountKey(giveaway.ID), 0, 0)
+
+	// Если есть требования, сохраняем их отдельно
+	if len(giveaway.Requirements) > 0 {
+		reqData, err := json.Marshal(giveaway.Requirements)
+		if err != nil {
+			return fmt.Errorf("failed to marshal requirements: %w", err)
+		}
+		pipe.Set(ctx, makeRequirementsKey(giveaway.ID), reqData, 0)
+	}
 
 	_, err = pipe.Exec(ctx)
 	return err
 }
 
 func (r *redisRepository) GetByID(ctx context.Context, id string) (*models.Giveaway, error) {
+	// Получаем основные данные гивевея
 	data, err := r.client.Get(ctx, makeGiveawayKey(id)).Bytes()
 	if err != nil {
 		if err == redis.Nil {
@@ -102,6 +123,20 @@ func (r *redisRepository) GetByID(ctx context.Context, id string) (*models.Givea
 	decoder.UseNumber()
 	if err := decoder.Decode(&giveaway); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal giveaway: %w", err)
+	}
+
+	// Получаем требования отдельно
+	reqData, err := r.client.Get(ctx, makeRequirementsKey(id)).Bytes()
+	if err != nil && err != redis.Nil {
+		return nil, fmt.Errorf("failed to get requirements: %w", err)
+	}
+
+	if err != redis.Nil && len(reqData) > 0 {
+		var requirements []models.Requirement
+		if err := json.Unmarshal(reqData, &requirements); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal requirements: %w", err)
+		}
+		giveaway.Requirements = requirements
 	}
 
 	return &giveaway, nil
@@ -153,11 +188,34 @@ func (r *redisRepository) GetByIDWithLock(ctx context.Context, tx repository.Tra
 }
 
 func (r *redisRepository) Update(ctx context.Context, giveaway *models.Giveaway) error {
-	data, err := json.Marshal(giveaway)
+	// Создаем копию гивевея без требований для основного хранения
+	giveawayData := *giveaway
+	giveawayData.Requirements = nil
+
+	data, err := json.Marshal(giveawayData)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal giveaway: %w", err)
 	}
-	return r.client.Set(ctx, makeGiveawayKey(giveaway.ID), data, 0).Err()
+
+	pipe := r.client.Pipeline()
+
+	// Обновляем основные данные гивевея
+	pipe.Set(ctx, makeGiveawayKey(giveaway.ID), data, 0)
+
+	// Обновляем требования
+	if len(giveaway.Requirements) > 0 {
+		reqData, err := json.Marshal(giveaway.Requirements)
+		if err != nil {
+			return fmt.Errorf("failed to marshal requirements: %w", err)
+		}
+		pipe.Set(ctx, makeRequirementsKey(giveaway.ID), reqData, 0)
+	} else {
+		// Если требований нет, удаляем ключ
+		pipe.Del(ctx, makeRequirementsKey(giveaway.ID))
+	}
+
+	_, err = pipe.Exec(ctx)
+	return err
 }
 
 func (r *redisRepository) UpdateTx(ctx context.Context, tx repository.Transaction, giveaway *models.Giveaway) error {
@@ -171,51 +229,13 @@ func (r *redisRepository) UpdateTx(ctx context.Context, tx repository.Transactio
 }
 
 func (r *redisRepository) Delete(ctx context.Context, id string) error {
-	// Начинаем транзакцию
-	tx, err := r.BeginTx(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback()
-
-	redisTx := tx.(*redisTransaction)
-
-	// Удаляем основные данные розыгрыша
-	redisTx.pipe.Del(ctx, makeGiveawayKey(id))
-
-	// Удаляем из всех списков статусов
-	redisTx.pipe.SRem(ctx, keyActiveGiveaways, id)
-	redisTx.pipe.SRem(ctx, keyPendingGiveaways, id)
-	redisTx.pipe.SRem(ctx, keyHistoryGiveaways, id)
-
-	// Удаляем счетчик участников
-	redisTx.pipe.Del(ctx, makeParticipantsCountKey(id))
-
-	// Удаляем список участников
-	redisTx.pipe.Del(ctx, makeGiveawayKey(id)+":participants")
-
-	// Удаляем билеты
-	redisTx.pipe.Del(ctx, makeGiveawayKey(id)+":tickets")
-
-	// Удаляем победителей
-	redisTx.pipe.Del(ctx, makeGiveawayKey(id)+":winners")
-
-	// Удаляем все связанные с призами данные
-	pattern := keyPrefixPrize + id + ":*"
-	keys, err := r.client.Keys(ctx, pattern).Result()
-	if err != nil {
-		return fmt.Errorf("failed to get prize keys: %w", err)
-	}
-	if len(keys) > 0 {
-		redisTx.pipe.Del(ctx, keys...)
-	}
-
-	// Фиксируем транзакцию
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	return nil
+	pipe := r.client.Pipeline()
+	pipe.Del(ctx, makeGiveawayKey(id))
+	pipe.Del(ctx, makeRequirementsKey(id))
+	pipe.Del(ctx, makeParticipantsCountKey(id))
+	pipe.SRem(ctx, keyActiveGiveaways, id)
+	_, err := pipe.Exec(ctx)
+	return err
 }
 
 func (r *redisRepository) GetActiveGiveaways(ctx context.Context) ([]string, error) {

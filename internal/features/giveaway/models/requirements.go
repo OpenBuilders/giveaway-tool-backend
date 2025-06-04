@@ -13,10 +13,69 @@ const (
 	RequirementTypeBoost        = "boost"        // Буст канала
 )
 
+// Статусы проверки требований
+const (
+	RequirementStatusPending = "pending" // Ожидает проверки
+	RequirementStatusSuccess = "success" // Успешно выполнено
+	RequirementStatusFailed  = "failed"  // Не выполнено
+	RequirementStatusSkipped = "skipped" // Пропущено (например, из-за RPS)
+	RequirementStatusError   = "error"   // Ошибка при проверке
+)
+
+// Requirement представляет требование для участия в розыгрыше
+type Requirement struct {
+	Name     string `json:"name"`     // Название требования для отображения
+	Type     string `json:"type"`     // Тип требования (subscription, boost)
+	Username string `json:"username"` // Username канала (с @ или без)
+}
+
+// Validate проверяет корректность требования
+func (r *Requirement) Validate() error {
+	if r.Name == "" {
+		return fmt.Errorf("requirement name is required")
+	}
+	if r.Type != RequirementTypeSubscription && r.Type != RequirementTypeBoost {
+		return fmt.Errorf("invalid requirement type: %s", r.Type)
+	}
+	if r.Username == "" {
+		return fmt.Errorf("username is required")
+	}
+	// Добавляем @ к username, если его нет
+	if !strings.HasPrefix(r.Username, "@") {
+		r.Username = "@" + r.Username
+	}
+	return nil
+}
+
+// ChatInfo содержит информацию о канале
+type ChatInfo struct {
+	Title    string `json:"title"`
+	Username string `json:"username"`
+	Type     string `json:"type"`
+}
+
+// RequirementCheckResult содержит результат проверки требования
+type RequirementCheckResult struct {
+	Name     string    `json:"name"`                // Название требования
+	Type     string    `json:"type"`                // Тип требования
+	Username string    `json:"username"`            // Username канала
+	Status   string    `json:"status"`              // Статус проверки
+	Error    string    `json:"error,omitempty"`     // Ошибка, если есть
+	ChatInfo *ChatInfo `json:"chat_info,omitempty"` // Информация о канале
+}
+
+// RequirementsCheckResponse содержит результаты проверки всех требований
+type RequirementsCheckResponse struct {
+	GiveawayID string                   `json:"giveaway_id"` // ID розыгрыша
+	Results    []RequirementCheckResult `json:"results"`     // Результаты проверки
+	AllMet     bool                     `json:"all_met"`     // Все требования выполнены
+}
+
+// RequirementTemplate представляет шаблон требования
 type RequirementTemplate struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Type string `json:"type"`
+	ID   string `json:"id"`   // Уникальный идентификатор шаблона
+	Name string `json:"name"` // Название для отображения
+	Type string `json:"type"` // Тип требования
 }
 
 func (t *RequirementTemplate) Validate() error {
@@ -28,41 +87,6 @@ func (t *RequirementTemplate) Validate() error {
 	}
 	if t.Type != RequirementTypeSubscription && t.Type != RequirementTypeBoost {
 		return fmt.Errorf("invalid requirement type: %s", t.Type)
-	}
-	return nil
-}
-
-func ValidateTemplates(templates []RequirementTemplate) error {
-	if len(templates) == 0 {
-		return fmt.Errorf("at least one requirement template is required")
-	}
-	for _, template := range templates {
-		if err := template.Validate(); err != nil {
-			return fmt.Errorf("invalid requirement template: %w", err)
-		}
-	}
-	return nil
-}
-
-type Requirement struct {
-	Name     string `json:"name"`     // Название требования для отображения
-	Type     string `json:"type"`     // Тип требования (subscription/boost)
-	Username string `json:"username"` // Юзернейм канала (например "@channel")
-}
-
-func (r *Requirement) Validate() error {
-	if r.Name == "" {
-		return fmt.Errorf("requirement name is required")
-	}
-	if r.Type != RequirementTypeSubscription && r.Type != RequirementTypeBoost {
-		return fmt.Errorf("invalid requirement type: %s", r.Type)
-	}
-	if r.Username == "" {
-		return fmt.Errorf("username is required")
-	}
-	// Проверяем формат username
-	if !strings.HasPrefix(r.Username, "@") {
-		r.Username = "@" + r.Username
 	}
 	return nil
 }
@@ -150,39 +174,4 @@ func (r *Requirement) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	return nil
-}
-
-// RequirementCheckStatus представляет статус выполнения требования
-type RequirementCheckStatus string
-
-const (
-	RequirementStatusPending RequirementCheckStatus = "pending" // Ещё не проверено
-	RequirementStatusSuccess RequirementCheckStatus = "success" // Требование выполнено
-	RequirementStatusFailed  RequirementCheckStatus = "failed"  // Требование не выполнено
-	RequirementStatusSkipped RequirementCheckStatus = "skipped" // Проверка пропущена (например, из-за RPS)
-	RequirementStatusError   RequirementCheckStatus = "error"   // Ошибка при проверке
-)
-
-// RequirementCheckResult представляет результат проверки одного требования
-type RequirementCheckResult struct {
-	Name     string                 `json:"name"`                // Название требования
-	Type     string                 `json:"type"`                // Тип требования
-	Username string                 `json:"username"`            // Username канала
-	Status   RequirementCheckStatus `json:"status"`              // Статус проверки
-	Error    string                 `json:"error,omitempty"`     // Описание ошибки, если есть
-	ChatInfo *ChatInfo              `json:"chat_info,omitempty"` // Информация о чате, если доступна
-}
-
-// ChatInfo представляет информацию о чате/канале
-type ChatInfo struct {
-	Title    string `json:"title"`    // Название чата/канала
-	Username string `json:"username"` // Юзернейм чата/канала
-	Type     string `json:"type"`     // Тип чата (channel, group, etc.)
-}
-
-// RequirementsCheckResponse представляет ответ на запрос проверки требований
-type RequirementsCheckResponse struct {
-	GiveawayID string                   `json:"giveaway_id"` // ID гивевея
-	Results    []RequirementCheckResult `json:"results"`     // Результаты проверки требований
-	AllMet     bool                     `json:"all_met"`     // Все ли требования выполнены
 }
