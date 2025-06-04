@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -21,17 +22,20 @@ type Client struct {
 	logger     *log.Logger
 }
 
+// RPSError представляет ошибку превышения лимита запросов
 type RPSError struct {
-	Description string
+	Msg string
 }
 
 func (e *RPSError) Error() string {
-	return fmt.Sprintf("telegram RPS error: %s", e.Description)
+	return e.Msg
 }
 
+// ChatMember представляет информацию о пользователе в чате
 type ChatMember struct {
-	Status         string `json:"status"`
-	CanInviteUsers bool   `json:"can_invite_users"`
+	Status             string `json:"status"`
+	CanInviteUsers     bool   `json:"can_invite_users"`
+	CanRestrictMembers bool   `json:"can_restrict_members"`
 }
 
 type Chat struct {
@@ -41,10 +45,12 @@ type Chat struct {
 	Username string `json:"username"`
 }
 
-type apiResponse struct {
+// Response представляет ответ от Telegram API
+type Response struct {
 	Ok          bool        `json:"ok"`
-	Description string      `json:"description,omitempty"`
 	Result      interface{} `json:"result,omitempty"`
+	Error       string      `json:"error,omitempty"`
+	Description string      `json:"description,omitempty"`
 }
 
 func NewClient() *Client {
@@ -58,37 +64,46 @@ func NewClient() *Client {
 }
 
 // ValidateRequirements проверяет доступность бота в указанных чатах
-func (c *Client) ValidateRequirements(requirements *models.Requirements) ([]error, error) {
-	var errors []error
+func (c *Client) ValidateRequirements(requirements *models.Requirements) ([]string, error) {
+	var errors []string
+
+	// Если требования отключены или пусты, возвращаем пустой список ошибок
+	if requirements == nil || len(requirements.Requirements) == 0 {
+		return errors, nil
+	}
+
+	// Проверяем каждое требование
 	for _, req := range requirements.Requirements {
-		// Получаем информацию о формате ID чата
-		chatInfo, err := req.GetChatIDInfo()
+		// Проверяем доступность бота в чате
+		chat, err := c.GetChat(req.ChatID)
 		if err != nil {
-			return nil, fmt.Errorf("invalid chat_id format: %w", err)
-		}
-
-		// Получаем числовой ID через API, если передан юзернейм
-		var numericChatID int64
-		if chatInfo.IsNumeric {
-			numericChatID = chatInfo.NumericID
-		} else {
-			numericChatID, err = c.GetChatIDByUsername(chatInfo.Username)
-			if err != nil {
-				errors = append(errors, fmt.Errorf("chat %s is not accessible: %w", chatInfo.RawID, err))
-				continue
-			}
-		}
-
-		// Проверяем права бота в чате
-		chatMember, err := c.GetBotChatMember(fmt.Sprintf("%d", numericChatID))
-		if err != nil {
-			c.logger.Printf("Failed to get bot member info: %v", err)
-			errors = append(errors, fmt.Errorf("failed to check bot permissions in chat %s: %w", chatInfo.RawID, err))
+			errors = append(errors, fmt.Sprintf("failed to get chat %s: %v", req.ChatID, err))
 			continue
 		}
 
-		if !chatMember.CanInviteUsers {
-			errors = append(errors, fmt.Errorf("bot needs invite users permission in chat %s", chatInfo.RawID))
+		// Проверяем права бота в чате
+		member, err := c.GetBotChatMember(fmt.Sprintf("%d", chat.ID))
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("failed to get bot member info for chat %s: %v", req.ChatID, err))
+			continue
+		}
+
+		// Проверяем тип требования
+		switch req.Type {
+		case "subscription":
+			// Для подписки достаточно базовых прав
+			if !member.CanInviteUsers {
+				errors = append(errors, fmt.Sprintf("bot doesn't have enough rights in chat %s to check subscriptions", req.ChatID))
+			}
+
+		case "boost":
+			// Для проверки бустов нужны права администратора
+			if !member.CanInviteUsers || !member.CanRestrictMembers {
+				errors = append(errors, fmt.Sprintf("bot doesn't have enough rights in chat %s to check boosts", req.ChatID))
+			}
+
+		default:
+			errors = append(errors, fmt.Sprintf("unknown requirement type: %s", req.Type))
 		}
 	}
 
@@ -168,15 +183,15 @@ func (c *Client) NotifyWinner(userID int64, giveaway *models.Giveaway, place int
 	return nil
 }
 
-func (c *Client) NotifyCreator(userID int64, giveaway *models.Giveaway) (*apiResponse, error) {
+func (c *Client) NotifyCreator(userID int64, giveaway *models.Giveaway) error {
 	c.logger.Printf("Sending notification to creator %d for giveaway %s", userID, giveaway.ID)
 
 	message := fmt.Sprintf(
-		"✨ Розыгрыш успешно создан!\n\n"+
-			"📋 Название: %s\n"+
-			"📝 Описание: %s\n"+
-			"⏰ Длительность: %d секунд\n"+
-			"👥 Количество победителей: %d\n\n"+
+		"✨ Розыгрыш успешно создан!\\n\\n"+
+			"📋 Название: %s\\n"+
+			"📝 Описание: %s\\n"+
+			"⏰ Длительность: %d секунд\\n"+
+			"👥 Количество победителей: %d\\n\\n"+
 			"🎯 Статус: %s",
 		giveaway.Title,
 		giveaway.Description,
@@ -186,17 +201,21 @@ func (c *Client) NotifyCreator(userID int64, giveaway *models.Giveaway) (*apiRes
 	)
 
 	if giveaway.MaxParticipants > 0 {
-		message += fmt.Sprintf("\n👥 Максимум участников: %d", giveaway.MaxParticipants)
+		message += fmt.Sprintf("\\n👥 Максимум участников: %d", giveaway.MaxParticipants)
 	}
 
 	response, err := c.sendMessage(userID, message)
 	if err != nil {
 		c.logger.Printf("Failed to send notification to creator %d: %v", userID, err)
-		return nil, err
+		return err
+	}
+
+	if !response.Ok {
+		return fmt.Errorf("telegram API error: %s", response.Error)
 	}
 
 	c.logger.Printf("Successfully sent notification to creator %d", userID)
-	return response, nil
+	return nil
 }
 
 // Вспомогательные методы
@@ -275,7 +294,7 @@ func (c *Client) checkChatMembership(ctx context.Context, userID, chatID int64) 
 	if err := c.makeRequest("GET", endpoint, params, &result); err != nil {
 		// Проверяем на ошибку RPS
 		if strings.Contains(err.Error(), "429") {
-			return false, &RPSError{Description: "too many requests"}
+			return false, &RPSError{Msg: "too many requests"}
 		}
 		return false, fmt.Errorf("failed to check membership: %w", err)
 	}
@@ -309,7 +328,7 @@ func (c *Client) checkBoostLevel(ctx context.Context, userID, chatID int64) (int
 	if err := c.makeRequest("GET", endpoint, params, &result); err != nil {
 		// Проверяем на ошибку RPS
 		if strings.Contains(err.Error(), "429") {
-			return 0, &RPSError{Description: "too many requests"}
+			return 0, &RPSError{Msg: "too many requests"}
 		}
 		return 0, fmt.Errorf("failed to check boost level: %w", err)
 	}
@@ -320,7 +339,7 @@ func (c *Client) checkBoostLevel(ctx context.Context, userID, chatID int64) (int
 	return result.Result.Level, nil
 }
 
-func (c *Client) sendMessage(chatID int64, text string) (*apiResponse, error) {
+func (c *Client) sendMessage(chatID int64, text string) (*Response, error) {
 	c.logger.Printf("Sending message to chat %d", chatID)
 
 	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", c.token)
@@ -329,59 +348,58 @@ func (c *Client) sendMessage(chatID int64, text string) (*apiResponse, error) {
 		"text":    {text},
 	}
 
-	var response apiResponse
-	err := c.makeRequest("POST", endpoint, params, &response)
-	if err != nil {
+	var response Response
+	if err := c.makeRequest("POST", endpoint, params, &response); err != nil {
 		c.logger.Printf("Failed to send message to chat %d: %v", chatID, err)
 		return nil, err
+	}
+
+	if !response.Ok {
+		return nil, fmt.Errorf("telegram API error: %s", response.Error)
 	}
 
 	c.logger.Printf("Successfully sent message to chat %d", chatID)
 	return &response, nil
 }
 
-func (c *Client) makeRequest(method, endpoint string, params url.Values, result interface{}) error {
-	c.logger.Printf("Making %s request to %s", method, endpoint)
+// makeRequest отправляет запрос к Telegram API и возвращает результат
+func (c *Client) makeRequest(method, endpoint string, data url.Values, result interface{}) error {
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
 
 	var req *http.Request
 	var err error
 
-	if method == "GET" && params != nil {
-		endpoint = fmt.Sprintf("%s?%s", endpoint, params.Encode())
-		req, err = http.NewRequest(method, endpoint, nil)
-	} else {
-		req, err = http.NewRequest(method, endpoint, strings.NewReader(params.Encode()))
+	if method == "POST" {
+		req, err = http.NewRequest(method, endpoint, strings.NewReader(data.Encode()))
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	} else {
+		if len(data) > 0 {
+			endpoint = fmt.Sprintf("%s?%s", endpoint, data.Encode())
+		}
+		req, err = http.NewRequest(method, endpoint, nil)
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
 	}
 
+	resp, err := client.Do(req)
 	if err != nil {
-		c.logger.Printf("Failed to create request: %v", err)
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		c.logger.Printf("Failed to make request: %v", err)
-		return fmt.Errorf("failed to make request: %w", err)
+		return fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		c.logger.Printf("Failed to read response body: %v", err)
-		return fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	c.logger.Printf("Response status: %d, body: %s", resp.StatusCode, string(body))
-
-	if resp.StatusCode != http.StatusOK {
-		c.logger.Printf("Telegram API returned non-200 status code: %d, body: %s", resp.StatusCode, string(body))
-		return fmt.Errorf("telegram API returned non-200 status code: %d, body: %s", resp.StatusCode, string(body))
+		return fmt.Errorf("failed to read response: %w", err)
 	}
 
 	if err := json.Unmarshal(body, result); err != nil {
-		c.logger.Printf("Failed to unmarshal response: %v", err)
-		return fmt.Errorf("failed to unmarshal response: %w", err)
+		return fmt.Errorf("failed to parse response: %w", err)
 	}
 
 	return nil
@@ -402,4 +420,109 @@ func (c *Client) GetChatIDByUsername(username string) (int64, error) {
 
 	c.logger.Printf("Got chat ID %d for username %s", chat.ID, username)
 	return chat.ID, nil
+}
+
+// CheckMembership проверяет, является ли пользователь участником канала/чата
+func (c *Client) CheckMembership(ctx context.Context, userID int64, chatID string) (bool, error) {
+	// Преобразуем chatID в числовой формат, если это возможно
+	var numericChatID int64
+	if chatID[0] == '@' {
+		// Если это юзернейм, сначала получаем информацию о чате
+		chat, err := c.GetChat(chatID)
+		if err != nil {
+			return false, fmt.Errorf("failed to get chat info: %w", err)
+		}
+		numericChatID = chat.ID
+	} else {
+		// Пробуем преобразовать строку в число
+		var err error
+		numericChatID, err = strconv.ParseInt(chatID, 10, 64)
+		if err != nil {
+			return false, fmt.Errorf("invalid chat ID format: %w", err)
+		}
+	}
+
+	// Формируем запрос к Telegram API
+	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/getChatMember", c.token)
+	data := url.Values{
+		"chat_id": {fmt.Sprintf("%d", numericChatID)},
+		"user_id": {fmt.Sprintf("%d", userID)},
+	}
+
+	var response struct {
+		Ok     bool       `json:"ok"`
+		Error  string     `json:"error"`
+		Result ChatMember `json:"result"`
+	}
+
+	if err := c.makeRequest("GET", endpoint, data, &response); err != nil {
+		return false, fmt.Errorf("failed to check membership: %w", err)
+	}
+
+	if !response.Ok {
+		if strings.Contains(response.Error, "Too Many Requests") {
+			return false, &RPSError{Msg: "Rate limit exceeded"}
+		}
+		return false, fmt.Errorf("telegram API error: %s", response.Error)
+	}
+
+	// Считаем пользователя участником, если его статус один из следующих:
+	validStatuses := []string{"creator", "administrator", "member", "restricted"}
+	for _, validStatus := range validStatuses {
+		if response.Result.Status == validStatus {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// CheckBoost проверяет, бустит ли пользователь канал
+func (c *Client) CheckBoost(ctx context.Context, userID int64, chatID string) (bool, error) {
+	// Преобразуем chatID в числовой формат, если это возможно
+	var numericChatID int64
+	if chatID[0] == '@' {
+		// Если это юзернейм, сначала получаем информацию о чате
+		chat, err := c.GetChat(chatID)
+		if err != nil {
+			return false, fmt.Errorf("failed to get chat info: %w", err)
+		}
+		numericChatID = chat.ID
+	} else {
+		// Пробуем преобразовать строку в число
+		var err error
+		numericChatID, err = strconv.ParseInt(chatID, 10, 64)
+		if err != nil {
+			return false, fmt.Errorf("invalid chat ID format: %w", err)
+		}
+	}
+
+	// Формируем запрос к Telegram API
+	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/getUserChatBoosts", c.token)
+	data := url.Values{
+		"chat_id": {fmt.Sprintf("%d", numericChatID)},
+		"user_id": {fmt.Sprintf("%d", userID)},
+	}
+
+	var response struct {
+		Ok     bool   `json:"ok"`
+		Error  string `json:"error"`
+		Result struct {
+			Boosts []interface{} `json:"boosts"`
+		} `json:"result"`
+	}
+
+	if err := c.makeRequest("GET", endpoint, data, &response); err != nil {
+		return false, fmt.Errorf("failed to check boost status: %w", err)
+	}
+
+	if !response.Ok {
+		if strings.Contains(response.Error, "Too Many Requests") {
+			return false, &RPSError{Msg: "Rate limit exceeded"}
+		}
+		return false, fmt.Errorf("telegram API error: %s", response.Error)
+	}
+
+	// Если есть хотя бы один активный буст, возвращаем true
+	return len(response.Result.Boosts) > 0, nil
 }

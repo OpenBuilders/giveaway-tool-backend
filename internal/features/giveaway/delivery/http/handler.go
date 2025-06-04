@@ -60,6 +60,7 @@ func (h *GiveawayHandler) RegisterRoutes(router *gin.RouterGroup) {
 		giveaways.POST("/:id/cancel", h.cancelGiveaway)
 		giveaways.POST("/:id/recreate", h.recreateGiveaway)
 		giveaways.POST("/parse-ids", h.parseIDsFile)
+		giveaways.GET("/:id/check-requirements", h.checkRequirements)
 	}
 
 	prizes := router.Group("/prizes")
@@ -1047,4 +1048,39 @@ func (h *GiveawayHandler) parseIDsFile(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, response)
+}
+
+// @Summary Проверить требования для участия в розыгрыше
+// @Description Проверяет выполнение всех требований для участия в розыгрыше (подписка на каналы, бусты и т.д.)
+// @Tags giveaways
+// @Accept json
+// @Produce json
+// @Security TelegramInitData
+// @Param id path string true "ID розыгрыша"
+// @Success 200 {object} models.RequirementsCheckResponse "Результаты проверки требований"
+// @Failure 400 {object} models.ErrorResponse "Неверный ID розыгрыша"
+// @Failure 401 {object} models.ErrorResponse "Не авторизован"
+// @Failure 404 {object} models.ErrorResponse "Розыгрыш не найден"
+// @Failure 500 {object} models.ErrorResponse "Внутренняя ошибка сервера"
+// @Router /giveaways/{id}/check-requirements [get]
+func (h *GiveawayHandler) checkRequirements(c *gin.Context) {
+	user, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	userData := user.(initdata.User)
+
+	results, err := h.service.CheckRequirements(c.Request.Context(), userData.ID, c.Param("id"))
+	if err != nil {
+		switch err {
+		case service.ErrNotFound:
+			c.JSON(http.StatusNotFound, gin.H{"error": "giveaway not found"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, results)
 }

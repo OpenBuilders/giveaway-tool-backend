@@ -42,6 +42,7 @@ type GiveawayService interface {
 	GetAllCreatedGiveaways(ctx context.Context, userID int64) ([]*models.GiveawayDetailedResponse, error)
 	CancelGiveaway(ctx context.Context, userID int64, giveawayID string) error
 	RecreateGiveaway(ctx context.Context, userID int64, giveawayID string) (*models.GiveawayResponse, error)
+	CheckRequirements(ctx context.Context, userID int64, giveawayID string) (*models.RequirementsCheckResponse, error)
 }
 
 type giveawayService struct {
@@ -161,17 +162,10 @@ func (s *giveawayService) Create(ctx context.Context, userID int64, input *model
 		return nil, err
 	}
 
-	// Declare resp outside the if statement scope
-	resp, err := s.telegramClient.NotifyCreator(userID, giveaway)
-	if err != nil {
+	// Отправляем уведомление создателю
+	if err := s.telegramClient.NotifyCreator(userID, giveaway); err != nil {
 		if s.debug {
 			log.Printf("[DEBUG] Failed to send notification to creator: %v", err)
-		}
-	}
-
-	if resultMap, ok := resp.Result.(map[string]interface{}); ok {
-		if messageID, ok := resultMap["message_id"].(float64); ok {
-			giveaway.MsgID = int64(messageID)
 		}
 	}
 
@@ -302,29 +296,31 @@ func (s *giveawayService) Join(ctx context.Context, userID int64, giveawayID str
 
 	// Проверяем требования для участия
 	if giveaway.Requirements != nil && len(giveaway.Requirements) > 0 {
-		requirements := &models.Requirements{
-			Requirements: giveaway.Requirements,
-			Enabled:      true,
-		}
-
 		if s.debug {
 			log.Printf("[DEBUG] Checking requirements for user %d in giveaway %s", userID, giveawayID)
 		}
 
-		// Проверяем требования через Telegram API
-		meetsRequirements, err := s.telegramClient.CheckRequirements(ctx, userID, requirements)
+		// Используем новый метод проверки требований
+		results, err := s.CheckRequirements(ctx, userID, giveawayID)
 		if err != nil {
-			// Если получили ошибку RPS, пропускаем проверку
-			var rpsErr *telegram.RPSError
-			if ok := errors.As(err, &rpsErr); ok {
-				if s.debug {
-					log.Printf("[DEBUG] Got RPS error while checking requirements, skipping checks: %v", err)
+			return fmt.Errorf("failed to check requirements: %w", err)
+		}
+
+		// Если не все требования выполнены и нет пропущенных проверок из-за RPS
+		if !results.AllMet {
+			// Проверяем, есть ли пропущенные проверки
+			hasSkipped := false
+			for _, result := range results.Results {
+				if result.Status == models.RequirementStatusSkipped {
+					hasSkipped = true
+					break
 				}
-			} else {
-				return fmt.Errorf("failed to check requirements: %w", err)
 			}
-		} else if !meetsRequirements {
-			return fmt.Errorf("user does not meet giveaway requirements")
+
+			// Если нет пропущенных проверок, значит требования точно не выполнены
+			if !hasSkipped {
+				return fmt.Errorf("user does not meet giveaway requirements")
+			}
 		}
 
 		if s.debug {
@@ -853,19 +849,124 @@ func (s *giveawayService) RecreateGiveaway(ctx context.Context, userID int64, gi
 		return nil, err
 	}
 
-	// Declare resp outside the if statement scope
-	resp, err := s.telegramClient.NotifyCreator(userID, newGiveaway)
-	if err != nil {
+	// Отправляем уведомление создателю
+	if err := s.telegramClient.NotifyCreator(userID, newGiveaway); err != nil {
 		if s.debug {
 			log.Printf("[DEBUG] Failed to send notification to creator: %v", err)
 		}
 	}
 
-	if resultMap, ok := resp.Result.(map[string]interface{}); ok {
-		if messageID, ok := resultMap["message_id"].(float64); ok {
-			newGiveaway.MsgID = int64(messageID)
-		}
+	return s.toResponse(ctx, newGiveaway)
+}
+
+func (s *giveawayService) CheckRequirements(ctx context.Context, userID int64, giveawayID string) (*models.RequirementsCheckResponse, error) {
+	if s.debug {
+		log.Printf("[DEBUG] Checking requirements for user %d in giveaway %s", userID, giveawayID)
 	}
 
-	return s.toResponse(ctx, newGiveaway)
+	// Получаем информацию о розыгрыше
+	giveaway, err := s.repo.GetByID(ctx, giveawayID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get giveaway: %w", err)
+	}
+
+	// Если требований нет, возвращаем успешный результат
+	if giveaway.Requirements == nil || len(giveaway.Requirements) == 0 {
+		return &models.RequirementsCheckResponse{
+			GiveawayID: giveawayID,
+			Results:    []models.RequirementCheckResult{},
+			AllMet:     true,
+		}, nil
+	}
+
+	// Создаем слайс для результатов проверки
+	results := make([]models.RequirementCheckResult, len(giveaway.Requirements))
+	allMet := true
+
+	// Проверяем каждое требование
+	for i, req := range giveaway.Requirements {
+		result := models.RequirementCheckResult{
+			Name:   req.Name,
+			Type:   req.Type,
+			Value:  req.Value,
+			ChatID: req.ChatID,
+			Status: models.RequirementStatusPending,
+		}
+
+		// Получаем информацию о чате
+		chatInfo, err := s.telegramClient.GetChat(req.ChatID)
+		if err == nil {
+			result.ChatInfo = &models.ChatInfo{
+				Title:    chatInfo.Title,
+				Username: chatInfo.Username,
+				Type:     chatInfo.Type,
+			}
+		}
+
+		// Проверяем требование в зависимости от типа
+		switch req.Type {
+		case "subscription":
+			// Проверяем подписку на канал
+			isMember, err := s.telegramClient.CheckMembership(ctx, userID, req.ChatID)
+			if err != nil {
+				// Если получили ошибку RPS, помечаем как пропущенное
+				var rpsErr *telegram.RPSError
+				if errors.As(err, &rpsErr) {
+					result.Status = models.RequirementStatusSkipped
+					result.Error = "Rate limit exceeded, check skipped"
+				} else {
+					result.Status = models.RequirementStatusError
+					result.Error = err.Error()
+				}
+				allMet = false
+			} else {
+				if isMember {
+					result.Status = models.RequirementStatusSuccess
+				} else {
+					result.Status = models.RequirementStatusFailed
+					allMet = false
+				}
+			}
+
+		case "boost":
+			// Проверяем буст канала
+			hasBoost, err := s.telegramClient.CheckBoost(ctx, userID, req.ChatID)
+			if err != nil {
+				// Если получили ошибку RPS, помечаем как пропущенное
+				var rpsErr *telegram.RPSError
+				if errors.As(err, &rpsErr) {
+					result.Status = models.RequirementStatusSkipped
+					result.Error = "Rate limit exceeded, check skipped"
+				} else {
+					result.Status = models.RequirementStatusError
+					result.Error = err.Error()
+				}
+				allMet = false
+			} else {
+				if hasBoost {
+					result.Status = models.RequirementStatusSuccess
+				} else {
+					result.Status = models.RequirementStatusFailed
+					allMet = false
+				}
+			}
+
+		default:
+			result.Status = models.RequirementStatusError
+			result.Error = "Unknown requirement type"
+			allMet = false
+		}
+
+		results[i] = result
+	}
+
+	if s.debug {
+		log.Printf("[DEBUG] Requirements check completed for user %d in giveaway %s, all met: %v", userID, giveawayID, allMet)
+	}
+
+	return &models.RequirementsCheckResponse{
+		GiveawayID: giveawayID,
+		Results:    results,
+		AllMet:     allMet,
+	}, nil
 }

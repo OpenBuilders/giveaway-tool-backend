@@ -150,3 +150,39 @@ func (r *Requirement) UnmarshalJSON(data []byte) error {
 	}
 	return nil
 }
+
+// RequirementCheckStatus представляет статус выполнения требования
+type RequirementCheckStatus string
+
+const (
+	RequirementStatusPending RequirementCheckStatus = "pending" // Ещё не проверено
+	RequirementStatusSuccess RequirementCheckStatus = "success" // Требование выполнено
+	RequirementStatusFailed  RequirementCheckStatus = "failed"  // Требование не выполнено
+	RequirementStatusSkipped RequirementCheckStatus = "skipped" // Проверка пропущена (например, из-за RPS)
+	RequirementStatusError   RequirementCheckStatus = "error"   // Ошибка при проверке
+)
+
+// RequirementCheckResult представляет результат проверки одного требования
+type RequirementCheckResult struct {
+	Name     string                 `json:"name"`                // Название требования
+	Type     string                 `json:"type"`                // Тип требования
+	Value    interface{}            `json:"value"`               // Значение требования
+	ChatID   string                 `json:"chat_id"`             // ID чата/канала
+	Status   RequirementCheckStatus `json:"status"`              // Статус проверки
+	Error    string                 `json:"error,omitempty"`     // Описание ошибки, если есть
+	ChatInfo *ChatInfo              `json:"chat_info,omitempty"` // Информация о чате, если доступна
+}
+
+// ChatInfo представляет информацию о чате/канале
+type ChatInfo struct {
+	Title    string `json:"title"`    // Название чата/канала
+	Username string `json:"username"` // Юзернейм чата/канала
+	Type     string `json:"type"`     // Тип чата (channel, group, etc.)
+}
+
+// RequirementsCheckResponse представляет ответ на запрос проверки требований
+type RequirementsCheckResponse struct {
+	GiveawayID string                   `json:"giveaway_id"` // ID гивевея
+	Results    []RequirementCheckResult `json:"results"`     // Результаты проверки требований
+	AllMet     bool                     `json:"all_met"`     // Все ли требования выполнены
+}
