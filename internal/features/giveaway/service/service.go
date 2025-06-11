@@ -441,6 +441,24 @@ func (s *giveawayService) toResponse(ctx context.Context, giveaway *models.Givea
 		return nil, fmt.Errorf("failed to get participants count: %w", err)
 	}
 
+	// Группируем призы по их типу и ID
+	uniquePrizes := make(map[string]models.PrizePlace)
+	for _, prize := range giveaway.Prizes {
+		prizeKey := fmt.Sprintf("%s_%s", prize.PrizeType, prize.PrizeID)
+		if _, exists := uniquePrizes[prizeKey]; !exists {
+			// Если это первый приз такого типа, сохраняем его с place = "all"
+			prizeCopy := prize
+			prizeCopy.Place = "all"
+			uniquePrizes[prizeKey] = prizeCopy
+		}
+	}
+
+	// Преобразуем map в slice
+	prizes := make([]models.PrizePlace, 0, len(uniquePrizes))
+	for _, prize := range uniquePrizes {
+		prizes = append(prizes, prize)
+	}
+
 	response := &models.GiveawayResponse{
 		ID:                giveaway.ID,
 		CreatorID:         giveaway.CreatorID,
@@ -456,7 +474,7 @@ func (s *giveawayService) toResponse(ctx context.Context, giveaway *models.Givea
 		ParticipantsCount: participantsCount,
 		CanEdit:           giveaway.IsEditable(),
 		UserRole:          "user", // Default role
-		Prizes:            giveaway.Prizes,
+		Prizes:            prizes,
 		Requirements:      giveaway.Requirements,
 		AutoDistribute:    giveaway.AutoDistribute,
 		AllowTickets:      giveaway.AllowTickets,
@@ -604,19 +622,32 @@ func (s *giveawayService) toDetailedResponse(ctx context.Context, giveaway *mode
 	}
 
 	// Формируем детальную информацию о призах
-	prizes := make([]models.PrizeDetail, len(giveaway.Prizes))
-	for i, prize := range giveaway.Prizes {
+	uniquePrizes := make(map[string]models.PrizeDetail)
+	for _, prize := range giveaway.Prizes {
 		prizeInfo, err := s.repo.GetPrize(ctx, prize.PrizeID)
 		if err != nil {
 			return nil, err
 		}
-		prizes[i] = models.PrizeDetail{
-			Type:        prizeInfo.Type,
-			Name:        prizeInfo.Name,
-			Description: prizeInfo.Description,
-			IsInternal:  prizeInfo.IsInternal,
-			Status:      s.getPrizeStatus(ctx, giveaway.ID, prize.PrizeID),
+		
+		// Создаем ключ для уникального приза (комбинация типа и имени)
+		prizeKey := string(prizeInfo.Type) + "_" + prizeInfo.Name
+		
+		// Если такой приз уже есть, пропускаем
+		if _, exists := uniquePrizes[prizeKey]; !exists {
+			uniquePrizes[prizeKey] = models.PrizeDetail{
+				Type:        prizeInfo.Type,
+				Name:        prizeInfo.Name,
+				Description: prizeInfo.Description,
+				IsInternal:  prizeInfo.IsInternal,
+				Status:      s.getPrizeStatus(ctx, giveaway.ID, prize.PrizeID),
+			}
 		}
+	}
+
+	// Преобразуем map в slice
+	prizes := make([]models.PrizeDetail, 0, len(uniquePrizes))
+	for _, prize := range uniquePrizes {
+		prizes = append(prizes, prize)
 	}
 
 	// Определяем роль пользователя
@@ -630,17 +661,6 @@ func (s *giveawayService) toDetailedResponse(ctx context.Context, giveaway *mode
 		}
 		if isParticipant {
 			userRole = "participant"
-			// Проверяем, не является ли пользователь победителем
-			winners, err := s.repo.GetWinners(ctx, giveaway.ID)
-			if err != nil {
-				return nil, err
-			}
-			for _, winner := range winners {
-				if winner.UserID == userID {
-					userRole = "winner"
-					break
-				}
-			}
 		}
 	}
 
@@ -658,7 +678,6 @@ func (s *giveawayService) toDetailedResponse(ctx context.Context, giveaway *mode
 		}
 	}
 
-	// Формируем детальную информацию о победителях
 	var winnerDetails []models.WinnerDetail
 	if giveaway.Status == models.GiveawayStatusCompleted || giveaway.Status == models.GiveawayStatusHistory {
 		winners, err := s.repo.GetWinners(ctx, giveaway.ID)
