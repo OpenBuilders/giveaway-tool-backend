@@ -103,9 +103,10 @@ func (r *Requirement) Validate() error {
 
 // ChatInfo содержит информацию о канале
 type ChatInfo struct {
-	Title    string `json:"title"`
-	Username string `json:"username"`
-	Type     string `json:"type"`
+	Title     string `json:"title"`
+	Username  string `json:"username"`
+	Type      string `json:"type"`
+	AvatarURL string `json:"avatar_url"`
 }
 
 // RequirementCheckResult содержит результат проверки требования

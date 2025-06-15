@@ -955,10 +955,15 @@ func (s *giveawayService) CheckRequirements(ctx context.Context, userID int64, g
 		// Получаем информацию о чате
 		chatInfo, err := s.telegramClient.GetChat(req.Username)
 		if err == nil {
+			avatarURL := ""
+			if chatInfo.Username != "" {
+				avatarURL = fmt.Sprintf("https://t.me/i/userpic/160/%s.jpg", chatInfo.Username)
+			}
 			result.ChatInfo = &models.ChatInfo{
-				Title:    chatInfo.Title,
-				Username: chatInfo.Username,
-				Type:     chatInfo.Type,
+				Title:     chatInfo.Title,
+				Username:  chatInfo.Username,
+				Type:      chatInfo.Type,
+				AvatarURL: avatarURL,
 			}
 		}
 
