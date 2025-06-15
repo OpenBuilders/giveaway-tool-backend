@@ -535,7 +535,7 @@ func (c *Client) GetPublicChannelInfo(ctx context.Context, username string, repo
 		log.Printf("Failed to get channel title: %v", err)
 	}
 
-	avatarURL := fmt.Sprintf("https://t.me/i/userpic/320/%s.jpg", username)
+	avatarURL := fmt.Sprintf("https://t.me/i/userpic/160/%s.jpg", username)
 
 	resp, err := c.httpClient.Head(avatarURL)
 	if err != nil {
