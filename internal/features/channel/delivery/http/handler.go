@@ -31,6 +31,7 @@ type ChannelInfo struct {
 	Title      string `json:"title"`
 	AvatarURL  string `json:"avatar_url"`
 	ChannelURL string `json:"channel_url"`
+	Username   string `json:"username"`
 }
 
 func (h *ChannelHandler) getUserChannels(c *gin.Context) {
@@ -55,12 +56,12 @@ func (h *ChannelHandler) getUserChannels(c *gin.Context) {
 		}
 
 		avatarURL := fmt.Sprintf("https://t.me/i/userpic/320/%s.jpg", username)
-
 		response = append(response, ChannelInfo{
 			ID:         channelID,
 			Title:      title,
 			AvatarURL:  avatarURL,
 			ChannelURL: "https://t.me/" + username,
+			Username:   "@" + username,
 		})
 	}
 
