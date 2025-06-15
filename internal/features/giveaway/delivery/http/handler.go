@@ -967,47 +967,60 @@ func (h *GiveawayHandler) checkRequirements(c *gin.Context) {
 	c.JSON(http.StatusOK, results)
 }
 
-// @Summary Получить список каналов пользователя
-// @Description Возвращает список каналов пользователя с их названиями и аватарами
+type ChannelInfo struct {
+	ID         int64  `json:"id"`
+	Title      string `json:"title"`
+	AvatarURL  string `json:"avatar_url"`
+	ChannelURL string `json:"channel_url"`
+}
+
+// @Summary Get user channels
+// @Description Get list of channels where user is admin with their titles and avatars
 // @Tags channels
+// @Accept json
 // @Produce json
-// @Security TelegramInitData
-// @Success 200 {array} object "Список каналов с информацией"
-// @Failure 401 {object} models.ErrorResponse "Не авторизован"
-// @Failure 500 {object} models.ErrorResponse "Внутренняя ошибка сервера"
+// @Success 200 {object} map[string][]ChannelInfo
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
 // @Router /channels/me [get]
 func (h *GiveawayHandler) getUserChannels(c *gin.Context) {
-	user, exists := c.Get("user")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+	userID := c.GetInt64("user_id")
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "unauthorized"})
 		return
 	}
-	userData := user.(initdata.User)
 
-	channelIDs, err := h.service.GetUserChannels(c.Request.Context(), userData.ID)
+	channelIDs, err := h.service.GetUserChannels(c.Request.Context(), userID)
 	if err != nil {
-		if os.Getenv("DEBUG") == "true" {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "debug_info": fmt.Sprintf("%+v", err)})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to get user channels"})
 		return
 	}
 
-	// Собираем расширенную информацию о каждом канале
-	channels := make([]gin.H, 0, len(channelIDs))
+	channels := make([]ChannelInfo, 0, len(channelIDs))
 	for _, channelID := range channelIDs {
-		avatar, _ := h.service.GetChannelAvatar(c.Request.Context(), channelID)
 		title, _ := h.service.GetChannelTitle(c.Request.Context(), channelID)
+		username, _ := h.service.GetChannelUsername(c.Request.Context(), channelID)
 
-		channels = append(channels, gin.H{
-			"id":     channelID,
-			"title":  title,
-			"avatar": avatar,
-		})
+		channelInfo := ChannelInfo{
+			ID:         channelID,
+			Title:      title,
+			ChannelURL: fmt.Sprintf("https://t.me/%s", username),
+		}
+
+		// Если есть username, пробуем получить аватар
+		if username != "" {
+			info, err := h.service.GetPublicChannelInfo(c.Request.Context(), username)
+			if err == nil {
+				channelInfo.AvatarURL = info.AvatarURL
+			}
+		}
+
+		channels = append(channels, channelInfo)
 	}
 
-	c.JSON(http.StatusOK, channels)
+	c.JSON(http.StatusOK, gin.H{
+		"channels": channels,
+	})
 }
 
 // @Summary Check if a bot exists in a channel

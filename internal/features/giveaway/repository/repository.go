@@ -98,4 +98,5 @@ type GiveawayRepository interface {
 
 	SetChannelAvatar(ctx context.Context, channelID string, avatarURL string) error
 	GetChannelAvatar(ctx context.Context, channelID string) (string, error)
+	GetChannelUsername(ctx context.Context, channelID int64) (string, error)
 }

@@ -1235,6 +1235,11 @@ func (r *redisRepository) SetChannelAvatar(ctx context.Context, channelID string
 
 // GetChannelAvatar получает аватар канала из Redis
 func (r *redisRepository) GetChannelAvatar(ctx context.Context, channelID string) (string, error) {
-	key := channelAvatarKey + channelID
+	return r.client.Get(ctx, channelAvatarKey+channelID).Result()
+}
+
+// GetChannelUsername получает username канала из Redis
+func (r *redisRepository) GetChannelUsername(ctx context.Context, channelID int64) (string, error) {
+	key := fmt.Sprintf("channel:%d:username", channelID)
 	return r.client.Get(ctx, key).Result()
 }

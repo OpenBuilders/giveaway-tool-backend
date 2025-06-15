@@ -48,6 +48,7 @@ type GiveawayService interface {
 	GetChannelAvatar(ctx context.Context, channelID int64) (string, error)
 	GetUserChannels(ctx context.Context, userID int64) ([]int64, error)
 	GetChannelTitle(ctx context.Context, channelID int64) (string, error)
+	GetChannelUsername(ctx context.Context, channelID int64) (string, error)
 	GetPublicChannelInfo(ctx context.Context, username string) (*telegram.PublicChannelInfo, error)
 }
 
@@ -1071,6 +1072,11 @@ func (s *giveawayService) GetChannelTitle(ctx context.Context, channelID int64) 
 	}
 
 	return title, nil
+}
+
+// GetChannelUsername получает username канала из Redis
+func (s *giveawayService) GetChannelUsername(ctx context.Context, channelID int64) (string, error) {
+	return s.repo.GetChannelUsername(ctx, channelID)
 }
 
 // GetPublicChannelInfo получает публичную информацию о канале
