@@ -80,6 +80,7 @@ func TelegramInitDataMiddleware() gin.HandlerFunc {
 		}
 
 		c.Set("user", parsedData.User)
+		c.Set("user_id", parsedData.User.ID)
 		c.Next()
 	}
 }
