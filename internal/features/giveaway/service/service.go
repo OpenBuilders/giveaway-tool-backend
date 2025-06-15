@@ -115,16 +115,14 @@ func (s *giveawayService) Create(ctx context.Context, userID int64, input *model
 	// Создаем призы
 	for i := range input.Prizes {
 		prize := &models.Prize{
-			ID:          uuid.New().String(),
-			Type:        models.PrizeType(input.Prizes[i].PrizeType),
-			Name:        fmt.Sprintf("Prize for place %d", input.Prizes[i].GetPlace()),
-			Description: fmt.Sprintf("Prize for place %d in giveaway", input.Prizes[i].GetPlace()),
-			IsInternal:  true, // По умолчанию считаем призы внутренними
+			ID:         uuid.New().String(),
+			Type:       models.PrizeType(input.Prizes[i].PrizeType),
+			Name:       fmt.Sprintf("Prize for place %d", input.Prizes[i].GetPlace()),
+			IsInternal: true, // По умолчанию считаем призы внутренними
 		}
 
 		if input.Prizes[i].IsAllPlaces() {
 			prize.Name = "Prize for all winners"
-			prize.Description = "Prize for all winners in giveaway"
 		}
 
 		if err := s.repo.CreatePrize(ctx, prize); err != nil {
@@ -148,26 +146,41 @@ func (s *giveawayService) Create(ctx context.Context, userID int64, input *model
 		}
 	}
 
-	// Обработка спонсоров: если передан только id, достаем остальные данные из Redis
+	// Обработка спонсоров: если передан только id или только username, достаем остальные данные из Redis или Telegram API
 	var sponsors []models.ChannelInfo
 	for _, sponsor := range input.Sponsors {
-		if sponsor.ID == 0 {
+		var info models.ChannelInfo
+		if sponsor.ID != 0 {
+			title, _ := s.channelService.GetChannelTitle(ctx, sponsor.ID)
+			username, _ := s.channelService.GetChannelUsername(ctx, sponsor.ID)
+			avatarURL, _ := s.channelService.GetChannelAvatar(ctx, sponsor.ID)
+			channelURL := ""
+			if username != "" {
+				channelURL = "https://t.me/" + username
+			}
+			info = models.ChannelInfo{
+				ID:         sponsor.ID,
+				Title:      title,
+				AvatarURL:  avatarURL,
+				ChannelURL: channelURL,
+				Username:   username,
+			}
+		} else if sponsor.Username != "" {
+			pubInfo, err := s.channelService.GetPublicChannelInfo(ctx, sponsor.Username)
+			if err != nil {
+				continue
+			}
+			info = models.ChannelInfo{
+				ID:         pubInfo.ID,
+				Title:      pubInfo.Title,
+				AvatarURL:  pubInfo.AvatarURL,
+				ChannelURL: pubInfo.ChannelURL,
+				Username:   pubInfo.Username,
+			}
+		} else {
 			continue
 		}
-		title, _ := s.channelService.GetChannelTitle(ctx, sponsor.ID)
-		username, _ := s.channelService.GetChannelUsername(ctx, sponsor.ID)
-		avatarURL, _ := s.channelService.GetChannelAvatar(ctx, sponsor.ID)
-		channelURL := ""
-		if username != "" {
-			channelURL = "https://t.me/" + username
-		}
-		sponsors = append(sponsors, models.ChannelInfo{
-			ID:         sponsor.ID,
-			Title:      title,
-			AvatarURL:  avatarURL,
-			ChannelURL: channelURL,
-			Username:   username,
-		})
+		sponsors = append(sponsors, info)
 	}
 
 	giveaway := &models.Giveaway{
@@ -382,11 +395,10 @@ func (s *giveawayService) GetPrizeTemplates(ctx context.Context) ([]*models.Priz
 
 func (s *giveawayService) CreateCustomPrize(ctx context.Context, input *models.CustomPrizeCreate) (*models.Prize, error) {
 	prize := &models.Prize{
-		ID:          uuid.New().String(),
-		Type:        models.PrizeTypeCustom,
-		Name:        input.Name,
-		Description: input.Description,
-		IsInternal:  false,
+		ID:         uuid.New().String(),
+		Type:       models.PrizeTypeCustom,
+		Name:       input.Name,
+		IsInternal: false,
 	}
 
 	if err := s.repo.CreatePrize(ctx, prize); err != nil {

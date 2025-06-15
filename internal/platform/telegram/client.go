@@ -55,6 +55,7 @@ type Response struct {
 
 // PublicChannelInfo содержит публичную информацию о канале
 type PublicChannelInfo struct {
+	ID         int64  `json:"id"`
 	Username   string `json:"username"`
 	ChannelURL string `json:"channel_url"`
 	AvatarURL  string `json:"avatar_url"`
@@ -168,7 +169,7 @@ func (c *Client) NotifyWinner(userID int64, giveaway *models.Giveaway, place int
 	c.logger.Printf("Sending notification to winner %d for giveaway %s (place %d)", userID, giveaway.ID, place)
 
 	message := fmt.Sprintf(
-		"�� Поздравляем! Вы заняли %d место в розыгрыше \"%s\"!\n\n"+
+		"Поздравляем! Вы заняли %d место в розыгрыше \"%s\"!\n\n"+
 			"🎁 Ваш приз: %s\n"+
 			"📝 Описание приза: %s\n\n",
 		place,
@@ -524,10 +525,11 @@ func (c *Client) GetPublicChannelInfo(ctx context.Context, username string, repo
 	username = strings.TrimPrefix(username, "@")
 
 	// Получаем ID канала по username
-	chatID, err := c.GetChatIDByUsername(username)
+	chat, err := c.GetChat("@" + username)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get chat ID: %w", err)
+		return nil, fmt.Errorf("failed to get chat info: %w", err)
 	}
+	chatID := chat.ID
 
 	// Получаем title канала из Redis
 	title, err := repo.GetChannelTitle(ctx, chatID)
@@ -556,6 +558,7 @@ func (c *Client) GetPublicChannelInfo(ctx context.Context, username string, repo
 	}
 
 	return &PublicChannelInfo{
+		ID:         chatID,
 		Username:   username,
 		ChannelURL: fmt.Sprintf("https://t.me/%s", username),
 		AvatarURL:  avatarURL,

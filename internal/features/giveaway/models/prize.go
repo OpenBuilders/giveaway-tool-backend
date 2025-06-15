@@ -26,7 +26,7 @@ type Prize struct {
 	ID          string             `json:"id"`
 	Type        PrizeType          `json:"type"`
 	Name        string             `json:"name"`
-	Description string             `json:"description"`
+	Description string             `json:"description,omitempty"`
 	IsInternal  bool               `json:"is_internal"`
 	Fields      []CustomPrizeField `json:"fields,omitempty"` // Only for custom prizes
 	CreatedAt   time.Time          `json:"created_at"`
