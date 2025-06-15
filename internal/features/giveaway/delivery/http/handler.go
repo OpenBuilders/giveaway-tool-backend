@@ -77,11 +77,11 @@ func (h *GiveawayHandler) RegisterRoutes(router *gin.RouterGroup) {
 		requirements.GET("/templates", h.getRequirementsTemplates)
 	}
 
-	channels := router.Group("/channels")
-	{
-		channels.GET("/me", h.getUserChannels)
-		channels.GET("/:username/info", h.getPublicChannelInfo)
-	}
+	// channels := router.Group("/channels")
+	// {
+	// 	channels.GET("/me", h.getUserChannels)
+	// 	channels.GET(":username/info", h.getPublicChannelInfo)
+	// }
 
 	// Add route for checking bot existence in a channel
 	router.POST("/bot/check", h.checkBotInChannel)
