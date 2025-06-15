@@ -8,6 +8,7 @@ import (
 	"giveaway-tool-backend/internal/features/giveaway/repository"
 	"giveaway-tool-backend/internal/platform/telegram"
 	"log"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -486,12 +487,16 @@ func (s *giveawayService) toResponse(ctx context.Context, giveaway *models.Givea
 		Sponsors:          giveaway.Sponsors,
 	}
 
-	// Получаем победителей для завершенных розыгрышей
-	if giveaway.Status == models.GiveawayStatusCompleted || giveaway.Status == models.GiveawayStatusHistory {
+	// Получаем победителей для завершенных розыгрышей и в процессе распределения наград
+	if giveaway.Status == models.GiveawayStatusCompleted || giveaway.Status == models.GiveawayStatusHistory || giveaway.Status == models.GiveawayStatusProcessing {
 		winners, err := s.repo.GetWinners(ctx, giveaway.ID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get winners: %w", err)
 		}
+		// Сортируем победителей по месту
+		sort.Slice(winners, func(i, j int) bool {
+			return winners[i].Place < winners[j].Place
+		})
 		response.Winners = winners
 	}
 
@@ -684,11 +689,15 @@ func (s *giveawayService) toDetailedResponse(ctx context.Context, giveaway *mode
 	}
 
 	var winnerDetails []models.WinnerDetail
-	if giveaway.Status == models.GiveawayStatusCompleted || giveaway.Status == models.GiveawayStatusHistory {
+	if giveaway.Status == models.GiveawayStatusCompleted || giveaway.Status == models.GiveawayStatusHistory || giveaway.Status == models.GiveawayStatusProcessing {
 		winners, err := s.repo.GetWinners(ctx, giveaway.ID)
 		if err != nil {
 			return nil, err
 		}
+		// Сортируем победителей по месту
+		sort.Slice(winners, func(i, j int) bool {
+			return winners[i].Place < winners[j].Place
+		})
 		winnerDetails = make([]models.WinnerDetail, len(winners))
 		for i, winner := range winners {
 			winnerUser, err := s.repo.GetUser(ctx, winner.UserID)
