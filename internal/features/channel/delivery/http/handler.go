@@ -1,6 +1,7 @@
 package http
 
 import (
+	"fmt"
 	"giveaway-tool-backend/internal/features/channel/service"
 	"net/http"
 
@@ -49,14 +50,11 @@ func (h *ChannelHandler) getUserChannels(c *gin.Context) {
 		}
 
 		username, err := h.service.GetChannelUsername(c.Request.Context(), channelID)
-		if err != nil {
+		if err != nil || username == "" {
 			continue
 		}
 
-		avatarURL, err := h.service.GetChannelAvatar(c.Request.Context(), channelID)
-		if err != nil {
-			continue
-		}
+		avatarURL := fmt.Sprintf("https://t.me/i/userpic/320/%s.jpg", username)
 
 		response = append(response, ChannelInfo{
 			ID:         channelID,
