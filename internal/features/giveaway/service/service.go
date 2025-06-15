@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"giveaway-tool-backend/internal/features/giveaway/models"
@@ -490,6 +491,31 @@ func (s *giveawayService) toResponse(ctx context.Context, giveaway *models.Givea
 		prizes = append(prizes, prize)
 	}
 
+	// Формируем расширенный requirements с инфой о канале
+	reqWithInfo := make([]models.RequirementWithChannelInfo, 0, len(giveaway.Requirements))
+	for _, req := range giveaway.Requirements {
+		username := req.Username
+		if username != "" && username[0] == '@' {
+			username = username[1:]
+		}
+		title := ""
+		if info, err := req.GetChatIDInfo(); err == nil && info.IsNumeric {
+			title, _ = s.channelService.GetChannelTitle(ctx, info.NumericID)
+		}
+		avatarURL := "https://t.me/i/userpic/160/" + username + ".jpg"
+		channelURL := "https://t.me/" + username
+		reqWithInfo = append(reqWithInfo, models.RequirementWithChannelInfo{
+			Type:     req.Type,
+			Username: req.Username,
+			ChannelInfo: models.ChannelInfo{
+				Title:      title,
+				Username:   username,
+				AvatarURL:  avatarURL,
+				ChannelURL: channelURL,
+			},
+		})
+	}
+
 	response := &models.GiveawayResponse{
 		ID:                giveaway.ID,
 		CreatorID:         giveaway.CreatorID,
@@ -506,12 +532,21 @@ func (s *giveawayService) toResponse(ctx context.Context, giveaway *models.Givea
 		CanEdit:           giveaway.IsEditable(),
 		UserRole:          "user", // Default role
 		Prizes:            prizes,
-		Requirements:      giveaway.Requirements,
+		Requirements:      nil, // заменим ниже
 		AutoDistribute:    giveaway.AutoDistribute,
 		AllowTickets:      giveaway.AllowTickets,
 		MsgID:             giveaway.MsgID,
 		Sponsors:          giveaway.Sponsors,
 	}
+	// Кладём requirements с полной инфой в map[string]interface{}
+	responseMap := make(map[string]interface{})
+	b, _ := json.Marshal(response)
+	_ = json.Unmarshal(b, &responseMap)
+	responseMap["requirements"] = reqWithInfo
+	b2, _ := json.Marshal(responseMap)
+	var finalResp models.GiveawayResponse
+	_ = json.Unmarshal(b2, &finalResp)
+	response = &finalResp
 
 	// Получаем победителей для завершенных розыгрышей и в процессе распределения наград
 	if giveaway.Status == models.GiveawayStatusCompleted || giveaway.Status == models.GiveawayStatusHistory || giveaway.Status == models.GiveawayStatusProcessing {

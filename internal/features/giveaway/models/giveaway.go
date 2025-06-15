@@ -377,3 +377,10 @@ type GiveawayStatusUpdate struct {
 	UpdatedAt  time.Time
 	Reason     string
 }
+
+// RequirementWithChannelInfo расширяет Requirement для ответа с инфой о канале
+type RequirementWithChannelInfo struct {
+	Type        string      `json:"type"`
+	Username    string      `json:"username"`
+	ChannelInfo ChannelInfo `json:"channel_info"`
+}
