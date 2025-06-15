@@ -34,3 +34,8 @@ func (r *redisRepository) SetChannelAvatar(ctx context.Context, username string,
 	key := fmt.Sprintf(ChannelAvatarKey, username)
 	return r.client.Set(ctx, key, avatarURL, 0).Err()
 }
+
+func (r *redisRepository) GetChannelTitle(ctx context.Context, channelID int64) (string, error) {
+	key := fmt.Sprintf(ChannelTitleKey, channelID)
+	return r.client.Get(ctx, key).Result()
+}

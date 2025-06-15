@@ -58,11 +58,13 @@ type PublicChannelInfo struct {
 	Username   string `json:"username"`
 	ChannelURL string `json:"channel_url"`
 	AvatarURL  string `json:"avatar_url"`
+	Title      string `json:"title"`
 }
 
 // ChannelAvatarRepository определяет методы для работы с аватарами каналов
 type ChannelAvatarRepository interface {
 	SetChannelAvatar(ctx context.Context, username string, avatarURL string) error
+	GetChannelTitle(ctx context.Context, chatID int64) (string, error)
 }
 
 func NewClient() *Client {
@@ -166,7 +168,7 @@ func (c *Client) NotifyWinner(userID int64, giveaway *models.Giveaway, place int
 	c.logger.Printf("Sending notification to winner %d for giveaway %s (place %d)", userID, giveaway.ID, place)
 
 	message := fmt.Sprintf(
-		"🎉 Поздравляем! Вы заняли %d место в розыгрыше \"%s\"!\n\n"+
+		"�� Поздравляем! Вы заняли %d место в розыгрыше \"%s\"!\n\n"+
 			"🎁 Ваш приз: %s\n"+
 			"📝 Описание приза: %s\n\n",
 		place,
@@ -521,6 +523,18 @@ func (c *Client) CheckBoost(ctx context.Context, userID int64, chatID string) (b
 func (c *Client) GetPublicChannelInfo(ctx context.Context, username string, repo ChannelAvatarRepository) (*PublicChannelInfo, error) {
 	username = strings.TrimPrefix(username, "@")
 
+	// Получаем ID канала по username
+	chatID, err := c.GetChatIDByUsername(username)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get chat ID: %w", err)
+	}
+
+	// Получаем title канала из Redis
+	title, err := repo.GetChannelTitle(ctx, chatID)
+	if err != nil {
+		log.Printf("Failed to get channel title: %v", err)
+	}
+
 	avatarURL := fmt.Sprintf("https://t.me/i/userpic/320/%s.jpg", username)
 
 	resp, err := c.httpClient.Head(avatarURL)
@@ -545,5 +559,6 @@ func (c *Client) GetPublicChannelInfo(ctx context.Context, username string, repo
 		Username:   username,
 		ChannelURL: fmt.Sprintf("https://t.me/%s", username),
 		AvatarURL:  avatarURL,
+		Title:      title,
 	}, nil
 }
