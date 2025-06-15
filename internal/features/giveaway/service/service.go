@@ -159,6 +159,7 @@ func (s *giveawayService) Create(ctx context.Context, userID int64, input *model
 		AllowTickets:    input.AllowTickets,
 		Requirements:    input.Requirements,
 		MsgID:           0,
+		Sponsors:        input.Sponsors,
 	}
 
 	if err := s.repo.Create(ctx, giveaway); err != nil {
@@ -482,6 +483,7 @@ func (s *giveawayService) toResponse(ctx context.Context, giveaway *models.Givea
 		AutoDistribute:    giveaway.AutoDistribute,
 		AllowTickets:      giveaway.AllowTickets,
 		MsgID:             giveaway.MsgID,
+		Sponsors:          giveaway.Sponsors,
 	}
 
 	// Получаем победителей для завершенных розыгрышей
@@ -865,6 +867,7 @@ func (s *giveawayService) RecreateGiveaway(ctx context.Context, userID int64, gi
 		AllowTickets:    giveaway.AllowTickets,
 		Requirements:    giveaway.Requirements,
 		MsgID:           0,
+		Sponsors:        giveaway.Sponsors,
 	}
 
 	if err := s.repo.Create(ctx, newGiveaway); err != nil {

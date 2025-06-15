@@ -44,6 +44,8 @@ type SwaggerGiveawayCreate struct {
 	AllowTickets bool `json:"allow_tickets" example:"true"`
 	// @Description Требования для участия
 	Requirements *Requirements `json:"requirements,omitempty"`
+	// @Description Список спонсоров
+	Sponsors []ChannelInfo `json:"sponsors" example:"[{\"id\":123456789,\"title\":\"Channel Name\",\"username\":\"channelname\",\"avatar_url\":\"https://t.me/i/userpic/160/channelname.jpg\",\"channel_url\":\"https://t.me/channelname\"}]"`
 }
 
 // @Description Информация о розыгрыше
@@ -80,6 +82,8 @@ type SwaggerGiveawayResponse struct {
 	AllowTickets bool `json:"allow_tickets" example:"true"`
 	// @Description Список победителей (только для завершенных розыгрышей)
 	Winners []Winner `json:"winners,omitempty"`
+	// @Description Список спонсоров
+	Sponsors []ChannelInfo `json:"sponsors" example:"[{\"id\":123456789,\"title\":\"Channel Name\",\"username\":\"channelname\",\"avatar_url\":\"https://t.me/i/userpic/160/channelname.jpg\",\"channel_url\":\"https://t.me/channelname\"}]"`
 }
 
 // @Description Детальная информация о розыгрыше
@@ -118,6 +122,8 @@ type SwaggerGiveawayDetailedResponse struct {
 	Winners []WinnerDetail `json:"winners,omitempty"`
 	// @Description Список призов с деталями
 	Prizes []PrizeDetail `json:"prizes"`
+	// @Description Список спонсоров
+	Sponsors []ChannelInfo `json:"sponsors" example:"[{\"id\":123456789,\"title\":\"Channel Name\",\"username\":\"channelname\",\"avatar_url\":\"https://t.me/i/userpic/160/channelname.jpg\",\"channel_url\":\"https://t.me/channelname\"}]"`
 }
 
 // @Description Ответ с ошибкой

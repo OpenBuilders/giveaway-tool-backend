@@ -41,6 +41,7 @@ type GiveawayResponse struct {
 	AutoDistribute    bool                  `json:"auto_distribute"`
 	Winners           []models.Winner       `json:"winners"`
 	AllowTickets      bool                  `json:"allow_tickets"`
+	Sponsors          []models.ChannelInfo  `json:"sponsors"`
 }
 
 // SwaggerGiveawayResponse represents the response body for giveaway operations with Swagger documentation

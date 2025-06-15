@@ -25,6 +25,14 @@ const (
 	GiveawayStatusCancelled  GiveawayStatus = "cancelled" // Cancelled
 )
 
+type ChannelInfo struct {
+	ID         int64  `json:"id"`
+	Title      string `json:"title"`
+	AvatarURL  string `json:"avatar_url"`
+	ChannelURL string `json:"channel_url"`
+	Username   string `json:"username"`
+}
+
 // Giveaway represents a giveaway event
 type Giveaway struct {
 	ID              string         `json:"id"`
@@ -44,6 +52,7 @@ type Giveaway struct {
 	AllowTickets    bool           `json:"allow_tickets"`             // Whether tickets are allowed
 	Requirements    []Requirement  `json:"requirements"`              // Participation requirements
 	MsgID           int64          `json:"msg_id"`
+	Sponsors        []ChannelInfo  `json:"sponsors"`
 }
 
 // UnmarshalJSON implements json.Unmarshaler
@@ -66,6 +75,7 @@ func (g *Giveaway) UnmarshalJSON(data []byte) error {
 		AutoDistribute  bool           `json:"auto_distribute,omitempty"`
 		AllowTickets    bool           `json:"allow_tickets"`
 		MsgID           int64          `json:"msg_id"`
+		Sponsors        []ChannelInfo  `json:"sponsors"`
 	}
 
 	raw := &RawGiveaway{}
@@ -90,6 +100,7 @@ func (g *Giveaway) UnmarshalJSON(data []byte) error {
 	g.AutoDistribute = raw.AutoDistribute
 	g.AllowTickets = raw.AllowTickets
 	g.MsgID = raw.MsgID
+	g.Sponsors = raw.Sponsors
 
 	// Теперь пробуем получить requirements из разных возможных форматов
 	var rawMap map[string]json.RawMessage
@@ -153,6 +164,7 @@ type GiveawayCreate struct {
 	AutoDistribute  bool          `json:"auto_distribute"`
 	AllowTickets    bool          `json:"allow_tickets"`
 	Requirements    []Requirement `json:"requirements"`
+	Sponsors        []ChannelInfo `json:"sponsors"`
 }
 
 type GiveawayUpdate struct {
@@ -182,6 +194,7 @@ type GiveawayResponse struct {
 	Winners           []Winner       `json:"winners,omitempty"` // Только для завершенных розыгрышей
 	AllowTickets      bool           `json:"allow_tickets"`     // Разрешены ли билеты
 	MsgID             int64          `json:"msg_id"`
+	Sponsors          []ChannelInfo  `json:"sponsors"`
 }
 
 // UnmarshalJSON implements json.Unmarshaler
@@ -207,6 +220,7 @@ func (g *GiveawayResponse) UnmarshalJSON(data []byte) error {
 		Winners           []Winner       `json:"winners,omitempty"`
 		AllowTickets      bool           `json:"allow_tickets"`
 		MsgID             int64          `json:"msg_id"`
+		Sponsors          []ChannelInfo  `json:"sponsors"`
 	}
 
 	raw := &RawGiveawayResponse{}
@@ -234,6 +248,7 @@ func (g *GiveawayResponse) UnmarshalJSON(data []byte) error {
 	g.Winners = raw.Winners
 	g.AllowTickets = raw.AllowTickets
 	g.MsgID = raw.MsgID
+	g.Sponsors = raw.Sponsors
 
 	// Теперь пробуем получить requirements из разных возможных форматов
 	var rawMap map[string]json.RawMessage
@@ -300,6 +315,7 @@ type GiveawayDetailedResponse struct {
 	UserRole          string         `json:"user_role"`     // owner, participant, winner
 	UserTickets       int            `json:"user_tickets"`  // количество билетов пользователя
 	TotalTickets      int            `json:"total_tickets"` // общее количество билетов
+	Sponsors          []ChannelInfo  `json:"sponsors"`
 }
 
 // WinnerDetail represents detailed information about a winner
