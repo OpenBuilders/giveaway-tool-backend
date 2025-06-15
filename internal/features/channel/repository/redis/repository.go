@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"giveaway-tool-backend/internal/features/channel/repository"
 	"giveaway-tool-backend/internal/features/giveaway/models"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -17,6 +18,7 @@ const (
 	UserChannelsKey          = "user:%d:channels"
 	ChannelInfoByIDKey       = "channel:info:id:%d"
 	ChannelInfoByUsernameKey = "channel:info:username:%s"
+	ChannelInfoTTL           = 14 * 24 * time.Hour // 14 дней
 )
 
 type redisRepository struct {
@@ -49,15 +51,14 @@ func (r *redisRepository) SetChannelInfo(ctx context.Context, info models.Channe
 	if err != nil {
 		return err
 	}
-	if err := r.client.Set(ctx, fmt.Sprintf(ChannelInfoByIDKey, info.ID), data, 0).Err(); err != nil {
-		return err
-	}
+
+	pipe := r.client.Pipeline()
+	pipe.Set(ctx, fmt.Sprintf(ChannelInfoByIDKey, info.ID), data, ChannelInfoTTL)
 	if info.Username != "" {
-		if err := r.client.Set(ctx, fmt.Sprintf(ChannelInfoByUsernameKey, info.Username), data, 0).Err(); err != nil {
-			return err
-		}
+		pipe.Set(ctx, fmt.Sprintf(ChannelInfoByUsernameKey, info.Username), data, ChannelInfoTTL)
 	}
-	return nil
+	_, err = pipe.Exec(ctx)
+	return err
 }
 
 func (r *redisRepository) GetChannelInfoByID(ctx context.Context, channelID int64) (*models.ChannelInfo, error) {

@@ -531,12 +531,6 @@ func (c *Client) GetPublicChannelInfo(ctx context.Context, username string, repo
 	}
 	chatID := chat.ID
 
-	// Получаем title канала из Redis
-	title, err := repo.GetChannelTitle(ctx, chatID)
-	if err != nil {
-		log.Printf("Failed to get channel title: %v", err)
-	}
-
 	avatarURL := fmt.Sprintf("https://t.me/i/userpic/160/%s.jpg", username)
 
 	resp, err := c.httpClient.Head(avatarURL)
@@ -551,17 +545,11 @@ func (c *Client) GetPublicChannelInfo(ctx context.Context, username string, repo
 		return nil, fmt.Errorf("failed to get avatar: status code %d", resp.StatusCode)
 	}
 
-	if avatarURL != "" {
-		if err := repo.SetChannelAvatar(ctx, username, avatarURL); err != nil {
-			log.Printf("Failed to cache channel avatar: %v", err)
-		}
-	}
-
 	return &PublicChannelInfo{
 		ID:         chatID,
 		Username:   username,
 		ChannelURL: fmt.Sprintf("https://t.me/%s", username),
 		AvatarURL:  avatarURL,
-		Title:      title,
+		Title:      chat.Title,
 	}, nil
 }
