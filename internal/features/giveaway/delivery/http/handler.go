@@ -1231,12 +1231,12 @@ func (h *GiveawayHandler) checkBotInChannelsBulk(c *gin.Context) {
 		}
 		chat, err := h.telegramClient.GetChat(uname)
 		if err != nil {
-			results = append(results, BulkBotCheckResult{Username: username, Ok: false, Error: "Channel not found or is not accessible"})
+			results = append(results, BulkBotCheckResult{Username: username, Ok: false, Error: fmt.Sprintf("Channel '%s' not found or is not accessible", username)})
 			continue
 		}
 		chatMember, err := h.telegramClient.GetBotChatMember(fmt.Sprintf("%d", chat.ID))
 		if err != nil {
-			results = append(results, BulkBotCheckResult{Username: username, Ok: false, Error: "Bot is not a member of this channel"})
+			results = append(results, BulkBotCheckResult{Username: username, Ok: false, Error: fmt.Sprintf("Bot is not a member of channel '%s'", username)})
 			continue
 		}
 		results = append(results, BulkBotCheckResult{
