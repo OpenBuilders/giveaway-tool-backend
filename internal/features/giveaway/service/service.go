@@ -11,6 +11,8 @@ import (
 	"sort"
 	"time"
 
+	channelservice "giveaway-tool-backend/internal/features/channel/service"
+
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
@@ -52,14 +54,16 @@ type giveawayService struct {
 	telegramClient *telegram.Client
 	debug          bool
 	redisClient    *redis.Client
+	channelService channelservice.ChannelService
 }
 
-func NewGiveawayService(repo repository.GiveawayRepository, redisClient *redis.Client, debug bool) GiveawayService {
+func NewGiveawayService(repo repository.GiveawayRepository, redisClient *redis.Client, debug bool, channelService channelservice.ChannelService) GiveawayService {
 	return &giveawayService{
 		repo:           repo,
 		telegramClient: telegram.NewClient(),
 		debug:          debug,
 		redisClient:    redisClient,
+		channelService: channelService,
 	}
 }
 
@@ -143,6 +147,28 @@ func (s *giveawayService) Create(ctx context.Context, userID int64, input *model
 		}
 	}
 
+	// Обработка спонсоров: если передан только id, достаем остальные данные из Redis
+	var sponsors []models.ChannelInfo
+	for _, sponsor := range input.Sponsors {
+		if sponsor.ID == 0 {
+			continue
+		}
+		title, _ := s.channelService.GetChannelTitle(ctx, sponsor.ID)
+		username, _ := s.channelService.GetChannelUsername(ctx, sponsor.ID)
+		avatarURL, _ := s.channelService.GetChannelAvatar(ctx, sponsor.ID)
+		channelURL := ""
+		if username != "" {
+			channelURL = "https://t.me/" + username
+		}
+		sponsors = append(sponsors, models.ChannelInfo{
+			ID:         sponsor.ID,
+			Title:      title,
+			AvatarURL:  avatarURL,
+			ChannelURL: channelURL,
+			Username:   username,
+		})
+	}
+
 	giveaway := &models.Giveaway{
 		ID:              uuid.New().String(),
 		CreatorID:       userID,
@@ -160,7 +186,7 @@ func (s *giveawayService) Create(ctx context.Context, userID int64, input *model
 		AllowTickets:    input.AllowTickets,
 		Requirements:    input.Requirements,
 		MsgID:           0,
-		Sponsors:        input.Sponsors,
+		Sponsors:        sponsors,
 	}
 
 	if err := s.repo.Create(ctx, giveaway); err != nil {

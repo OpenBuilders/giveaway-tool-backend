@@ -99,8 +99,8 @@ func main() {
 
 	// Initialize services
 	userSvc := userservice.NewUserService(userRepository)
-	giveawaySvc := giveawayservice.NewGiveawayService(giveawayRepository, rdb, cfg.Debug)
 	channelSvc := channelservice.NewChannelService(channelRepository, rdb, cfg.Debug)
+	giveawaySvc := giveawayservice.NewGiveawayService(giveawayRepository, rdb, cfg.Debug, channelSvc)
 	// tonProofSvc := tonproofservice.NewService(tonProofRepository)
 	telegramClient := telegram.NewClient()
 	completionService := giveawayservice.NewCompletionService(giveawayRepository, telegramClient)
