@@ -95,7 +95,7 @@ func main() {
 
 	// Initialize services
 	userSvc := userservice.NewUserService(userRepository)
-	giveawaySvc := giveawayservice.NewGiveawayService(giveawayRepository, cfg.Debug)
+	giveawaySvc := giveawayservice.NewGiveawayService(giveawayRepository, rdb, cfg.Debug)
 	// tonProofSvc := tonproofservice.NewService(tonProofRepository)
 	telegramClient := telegram.NewClient()
 	completionService := giveawayservice.NewCompletionService(giveawayRepository, telegramClient)

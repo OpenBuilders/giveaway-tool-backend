@@ -74,6 +74,12 @@ func (h *GiveawayHandler) RegisterRoutes(router *gin.RouterGroup) {
 		requirements.GET("/templates", h.getRequirementsTemplates)
 	}
 
+	channels := router.Group("/channels")
+	{
+		channels.GET("/me", h.getUserChannels)
+		channels.GET("/:username/info", h.GetPublicChannelInfo)
+	}
+
 	// Add route for checking bot existence in a channel
 	router.POST("/bot/check", h.checkBotInChannel)
 }
@@ -730,130 +736,6 @@ func (h *GiveawayHandler) getParticipationHistory(c *gin.Context) {
 	c.JSON(http.StatusOK, giveaways)
 }
 
-// @Summary Check if a bot exists in a channel
-// @Description Check if the Telegram bot exists in a channel and has access to member information
-// @Tags bot
-// @Accept json
-// @Produce json
-// @Security TelegramInitData
-// @Param request body map[string]string true "Request with channel username"
-// @Success 200 {object} map[string]interface{} "Channel and bot status information"
-// @Failure 400 {object} models.ErrorResponse "Bad request"
-// @Failure 401 {object} models.ErrorResponse "Unauthorized"
-// @Failure 404 {object} models.ErrorResponse "Bot not found in channel"
-// @Failure 500 {object} models.ErrorResponse "Internal server error"
-// @Router /bot/check [post]
-func (h *GiveawayHandler) checkBotInChannel(c *gin.Context) {
-	// Check authentication
-	_, exists := c.Get("user")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-
-	// Parse request body
-	var requestBody struct {
-		Username string `json:"username"`
-	}
-
-	if err := c.ShouldBindJSON(&requestBody); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
-		return
-	}
-
-	if requestBody.Username == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Username is required"})
-		return
-	}
-
-	// Ensure username is properly formatted with @ prefix if needed
-	username := requestBody.Username
-	if !strings.HasPrefix(username, "@") {
-		username = "@" + username
-	}
-
-	// Получаем информацию о канале и его числовой ID
-	chat, err := h.telegramClient.GetChat(username)
-	if err != nil {
-		if os.Getenv("DEBUG") == "true" {
-			c.JSON(http.StatusNotFound, gin.H{
-				"error":      "Channel not found or is not accessible",
-				"debug_info": err.Error(),
-			})
-		} else {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Channel not found or is not accessible"})
-		}
-		return
-	}
-
-	// Проверяем права бота используя числовой ID
-	chatMember, err := h.telegramClient.GetBotChatMember(fmt.Sprintf("%d", chat.ID))
-	if err != nil {
-		if os.Getenv("DEBUG") == "true" {
-			c.JSON(http.StatusNotFound, gin.H{
-				"error":      "Bot is not a member of this channel",
-				"debug_info": err.Error(),
-			})
-		} else {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Bot is not a member of this channel"})
-		}
-		return
-	}
-
-	// Возвращаем полную информацию о канале и статусе бота
-	c.JSON(http.StatusOK, gin.H{
-		"channel": gin.H{
-			"id":       chat.ID,
-			"type":     chat.Type,
-			"title":    chat.Title,
-			"username": chat.Username,
-		},
-		"bot_status": gin.H{
-			"status":            chatMember.Status,
-			"can_check_members": chatMember.CanInviteUsers,
-		},
-	})
-}
-
-// @Summary Get top giveaways
-// @Description Get top giveaways sorted by participants count
-// @Tags giveaways
-// @Accept json
-// @Produce json
-// @Security TelegramInitData
-// @Param limit query int false "Number of giveaways to return (default 10, max 50)"
-// @Success 200 {array} models.GiveawayResponse "Top giveaways"
-// @Failure 400 {object} models.ErrorResponse "Invalid request"
-// @Failure 500 {object} models.ErrorResponse "Internal server error"
-// @Router /giveaways/top [get]
-func (h *GiveawayHandler) getTopGiveaways(c *gin.Context) {
-	// Parse limit parameter
-	limit := 10 // default limit
-	if limitStr := c.Query("limit"); limitStr != "" {
-		parsedLimit, err := strconv.Atoi(limitStr)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit parameter"})
-			return
-		}
-		if parsedLimit > 0 {
-			limit = parsedLimit
-		}
-	}
-	// Cap maximum limit
-	if limit > 50 {
-		limit = 50
-	}
-
-	// Get top giveaways
-	giveaways, err := h.service.GetTopGiveaways(c.Request.Context(), limit)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, giveaways)
-}
-
 // @Summary Получить все мои розыгрыши
 // @Description Возвращает список всех розыгрышей, созданных пользователем (активные и исторические)
 // @Tags giveaways
@@ -1083,4 +965,203 @@ func (h *GiveawayHandler) checkRequirements(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, results)
+}
+
+// @Summary Получить список каналов пользователя
+// @Description Возвращает список каналов пользователя с их названиями и аватарами
+// @Tags channels
+// @Produce json
+// @Security TelegramInitData
+// @Success 200 {array} object "Список каналов с информацией"
+// @Failure 401 {object} models.ErrorResponse "Не авторизован"
+// @Failure 500 {object} models.ErrorResponse "Внутренняя ошибка сервера"
+// @Router /channels/me [get]
+func (h *GiveawayHandler) getUserChannels(c *gin.Context) {
+	user, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+	userData := user.(initdata.User)
+
+	channelIDs, err := h.service.GetUserChannels(c.Request.Context(), userData.ID)
+	if err != nil {
+		if os.Getenv("DEBUG") == "true" {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "debug_info": fmt.Sprintf("%+v", err)})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+
+	// Собираем расширенную информацию о каждом канале
+	channels := make([]gin.H, 0, len(channelIDs))
+	for _, channelID := range channelIDs {
+		avatar, _ := h.service.GetChannelAvatar(c.Request.Context(), channelID)
+		title, _ := h.service.GetChannelTitle(c.Request.Context(), channelID)
+
+		channels = append(channels, gin.H{
+			"id":     channelID,
+			"title":  title,
+			"avatar": avatar,
+		})
+	}
+
+	c.JSON(http.StatusOK, channels)
+}
+
+// @Summary Check if a bot exists in a channel
+// @Description Check if the Telegram bot exists in a channel and has access to member information
+// @Tags bot
+// @Accept json
+// @Produce json
+// @Security TelegramInitData
+// @Param request body map[string]string true "Request with channel username"
+// @Success 200 {object} map[string]interface{} "Channel and bot status information"
+// @Failure 400 {object} models.ErrorResponse "Bad request"
+// @Failure 401 {object} models.ErrorResponse "Unauthorized"
+// @Failure 404 {object} models.ErrorResponse "Bot not found in channel"
+// @Failure 500 {object} models.ErrorResponse "Internal server error"
+// @Router /bot/check [post]
+func (h *GiveawayHandler) checkBotInChannel(c *gin.Context) {
+	// Check authentication
+	_, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	// Parse request body
+	var requestBody struct {
+		Username string `json:"username"`
+	}
+
+	if err := c.ShouldBindJSON(&requestBody); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format"})
+		return
+	}
+
+	if requestBody.Username == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Username is required"})
+		return
+	}
+
+	// Ensure username is properly formatted with @ prefix if needed
+	username := requestBody.Username
+	if !strings.HasPrefix(username, "@") {
+		username = "@" + username
+	}
+
+	chat, err := h.telegramClient.GetChat(username)
+	if err != nil {
+		if os.Getenv("DEBUG") == "true" {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":      "Channel not found or is not accessible",
+				"debug_info": err.Error(),
+			})
+		} else {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Channel not found or is not accessible"})
+		}
+		return
+	}
+
+	chatMember, err := h.telegramClient.GetBotChatMember(fmt.Sprintf("%d", chat.ID))
+	if err != nil {
+		if os.Getenv("DEBUG") == "true" {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":      "Bot is not a member of this channel",
+				"debug_info": err.Error(),
+			})
+		} else {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Bot is not a member of this channel"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"channel": gin.H{
+			"id":       chat.ID,
+			"type":     chat.Type,
+			"title":    chat.Title,
+			"username": chat.Username,
+		},
+		"bot_status": gin.H{
+			"status":            chatMember.Status,
+			"can_check_members": chatMember.CanInviteUsers,
+		},
+	})
+}
+
+// @Summary Get top giveaways
+// @Description Get top giveaways sorted by participants count
+// @Tags giveaways
+// @Accept json
+// @Produce json
+// @Security TelegramInitData
+// @Param limit query int false "Number of giveaways to return (default 10, max 50)"
+// @Success 200 {array} models.GiveawayResponse "Top giveaways"
+// @Failure 400 {object} models.ErrorResponse "Invalid request"
+// @Failure 500 {object} models.ErrorResponse "Internal server error"
+// @Router /giveaways/top [get]
+func (h *GiveawayHandler) getTopGiveaways(c *gin.Context) {
+	// Parse limit parameter
+	limit := 10 // default limit
+	if limitStr := c.Query("limit"); limitStr != "" {
+		parsedLimit, err := strconv.Atoi(limitStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit parameter"})
+			return
+		}
+		if parsedLimit > 0 {
+			limit = parsedLimit
+		}
+	}
+	// Cap maximum limit
+	if limit > 50 {
+		limit = 50
+	}
+
+	// Get top giveaways
+	giveaways, err := h.service.GetTopGiveaways(c.Request.Context(), limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, giveaways)
+}
+
+// ErrorResponse представляет структуру ответа с ошибкой
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
+
+// @Summary Get public channel info
+// @Description Get public information about a channel including its URL and avatar
+// @Tags channels
+// @Accept json
+// @Produce json
+// @Param username path string true "Channel username without @"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /channels/{username}/info [get]
+func (h *GiveawayHandler) GetPublicChannelInfo(c *gin.Context) {
+	username := c.Param("username")
+	if username == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "username is required"})
+		return
+	}
+
+	info, err := h.service.GetPublicChannelInfo(c.Request.Context(), username)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"username":    info.Username,
+		"channel_url": info.ChannelURL,
+		"avatar_url":  info.AvatarURL,
+	})
 }

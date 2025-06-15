@@ -95,4 +95,7 @@ type GiveawayRepository interface {
 	GetTopGiveaways(ctx context.Context, limit int) ([]*models.Giveaway, error)
 
 	CancelGiveaway(ctx context.Context, giveawayID string) error
+
+	SetChannelAvatar(ctx context.Context, channelID string, avatarURL string) error
+	GetChannelAvatar(ctx context.Context, channelID string) (string, error)
 }

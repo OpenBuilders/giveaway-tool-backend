@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"giveaway-tool-backend/internal/features/giveaway/models"
+	"giveaway-tool-backend/internal/features/giveaway/repository"
 	"io"
 	"log"
 	"net/http"
@@ -51,6 +52,13 @@ type Response struct {
 	Result      interface{} `json:"result,omitempty"`
 	Error       string      `json:"error,omitempty"`
 	Description string      `json:"description,omitempty"`
+}
+
+// PublicChannelInfo содержит публичную информацию о канале
+type PublicChannelInfo struct {
+	Username   string `json:"username"`
+	ChannelURL string `json:"channel_url"`
+	AvatarURL  string `json:"avatar_url"`
 }
 
 func NewClient() *Client {
@@ -216,9 +224,6 @@ func (c *Client) NotifyCreator(userID int64, giveaway *models.Giveaway) error {
 	return nil
 }
 
-// Вспомогательные методы
-
-// GetChat retrieves information about a chat by username or ID
 func (c *Client) GetChat(chatID string) (*Chat, error) {
 	c.logger.Printf("Getting chat info for %s", chatID)
 
@@ -248,7 +253,6 @@ func (c *Client) GetChat(chatID string) (*Chat, error) {
 	return &result.Result, nil
 }
 
-// GetBotChatMember checks if the bot is a member of the specified chat and returns its status
 func (c *Client) GetBotChatMember(chatID string) (*ChatMember, error) {
 	c.logger.Printf("Getting bot membership info for chat %s", chatID)
 
@@ -290,7 +294,6 @@ func (c *Client) checkChatMembership(ctx context.Context, userID, chatID int64) 
 	}
 
 	if err := c.makeRequest("GET", endpoint, params, &result); err != nil {
-		// Проверяем на ошибку RPS
 		if strings.Contains(err.Error(), "429") {
 			return false, &RPSError{Msg: "too many requests"}
 		}
@@ -324,7 +327,6 @@ func (c *Client) checkBoostLevel(ctx context.Context, userID, chatID int64) (int
 	}
 
 	if err := c.makeRequest("GET", endpoint, params, &result); err != nil {
-		// Проверяем на ошибку RPS
 		if strings.Contains(err.Error(), "429") {
 			return 0, &RPSError{Msg: "too many requests"}
 		}
@@ -360,7 +362,6 @@ func (c *Client) sendMessage(chatID int64, text string) (*Response, error) {
 	return &response, nil
 }
 
-// makeRequest отправляет запрос к Telegram API и возвращает результат
 func (c *Client) makeRequest(method, endpoint string, data url.Values, result interface{}) error {
 	client := &http.Client{
 		Timeout: 10 * time.Second,
@@ -403,7 +404,6 @@ func (c *Client) makeRequest(method, endpoint string, data url.Values, result in
 	return nil
 }
 
-// GetChatIDByUsername получает числовой ID канала по его юзернейму
 func (c *Client) GetChatIDByUsername(username string) (int64, error) {
 	if !strings.HasPrefix(username, "@") {
 		username = "@" + username
@@ -420,19 +420,15 @@ func (c *Client) GetChatIDByUsername(username string) (int64, error) {
 	return chat.ID, nil
 }
 
-// CheckMembership проверяет, является ли пользователь участником канала/чата
 func (c *Client) CheckMembership(ctx context.Context, userID int64, chatID string) (bool, error) {
-	// Преобразуем chatID в числовой формат, если это возможно
 	var numericChatID int64
 	if chatID[0] == '@' {
-		// Если это юзернейм, сначала получаем информацию о чате
 		chat, err := c.GetChat(chatID)
 		if err != nil {
 			return false, fmt.Errorf("failed to get chat info: %w", err)
 		}
 		numericChatID = chat.ID
 	} else {
-		// Пробуем преобразовать строку в число
 		var err error
 		numericChatID, err = strconv.ParseInt(chatID, 10, 64)
 		if err != nil {
@@ -440,7 +436,6 @@ func (c *Client) CheckMembership(ctx context.Context, userID int64, chatID strin
 		}
 	}
 
-	// Формируем запрос к Telegram API
 	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/getChatMember", c.token)
 	data := url.Values{
 		"chat_id": {fmt.Sprintf("%d", numericChatID)},
@@ -464,7 +459,6 @@ func (c *Client) CheckMembership(ctx context.Context, userID int64, chatID strin
 		return false, fmt.Errorf("telegram API error: %s", response.Error)
 	}
 
-	// Считаем пользователя участником, если его статус один из следующих:
 	validStatuses := []string{"creator", "administrator", "member", "restricted"}
 	for _, validStatus := range validStatuses {
 		if response.Result.Status == validStatus {
@@ -475,19 +469,15 @@ func (c *Client) CheckMembership(ctx context.Context, userID int64, chatID strin
 	return false, nil
 }
 
-// CheckBoost проверяет, бустит ли пользователь канал
 func (c *Client) CheckBoost(ctx context.Context, userID int64, chatID string) (bool, error) {
-	// Преобразуем chatID в числовой формат, если это возможно
 	var numericChatID int64
 	if chatID[0] == '@' {
-		// Если это юзернейм, сначала получаем информацию о чате
 		chat, err := c.GetChat(chatID)
 		if err != nil {
 			return false, fmt.Errorf("failed to get chat info: %w", err)
 		}
 		numericChatID = chat.ID
 	} else {
-		// Пробуем преобразовать строку в число
 		var err error
 		numericChatID, err = strconv.ParseInt(chatID, 10, 64)
 		if err != nil {
@@ -495,7 +485,6 @@ func (c *Client) CheckBoost(ctx context.Context, userID int64, chatID string) (b
 		}
 	}
 
-	// Формируем запрос к Telegram API
 	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/getUserChatBoosts", c.token)
 	data := url.Values{
 		"chat_id": {fmt.Sprintf("%d", numericChatID)},
@@ -521,6 +510,36 @@ func (c *Client) CheckBoost(ctx context.Context, userID int64, chatID string) (b
 		return false, fmt.Errorf("telegram API error: %s", response.Error)
 	}
 
-	// Если есть хотя бы один активный буст, возвращаем true
 	return len(response.Result.Boosts) > 0, nil
+}
+
+func (c *Client) GetPublicChannelInfo(ctx context.Context, username string, repo repository.GiveawayRepository) (*PublicChannelInfo, error) {
+
+	username = strings.TrimPrefix(username, "@")
+
+	avatarURL := fmt.Sprintf("https://t.me/i/userpic/320/%s.jpg", username)
+
+	resp, err := c.httpClient.Head(avatarURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check avatar: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		avatarURL = ""
+	} else if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("failed to get avatar: status code %d", resp.StatusCode)
+	}
+
+	if avatarURL != "" {
+		if err := repo.SetChannelAvatar(ctx, username, avatarURL); err != nil {
+			log.Printf("Failed to cache channel avatar: %v", err)
+		}
+	}
+
+	return &PublicChannelInfo{
+		Username:   username,
+		ChannelURL: fmt.Sprintf("https://t.me/%s", username),
+		AvatarURL:  avatarURL,
+	}, nil
 }

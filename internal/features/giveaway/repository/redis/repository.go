@@ -49,7 +49,8 @@ const (
 	keyTopGiveaways            = "giveaways:top"
 	defaultLockTimeout         = 30 * time.Second
 	keyProcessingSet           = "giveaways:processing"
-	keyRequirements            = "requirements" // Префикс для ключей требований
+	keyRequirements            = "requirements"    // Префикс для ключей требований
+	channelAvatarKey           = "channel:avatar:" // + channelID
 )
 
 func NewRedisGiveawayRepository(client *redis.Client) repository.GiveawayRepository {
@@ -1224,4 +1225,16 @@ func (r *redisRepository) CancelGiveaway(ctx context.Context, giveawayID string)
 	// Выполняем транзакцию
 	_, err = tx.Exec(ctx)
 	return err
+}
+
+// SetChannelAvatar сохраняет аватар канала в Redis на 15 минут
+func (r *redisRepository) SetChannelAvatar(ctx context.Context, channelID string, avatarURL string) error {
+	key := channelAvatarKey + channelID
+	return r.client.Set(ctx, key, avatarURL, 15*time.Minute).Err()
+}
+
+// GetChannelAvatar получает аватар канала из Redis
+func (r *redisRepository) GetChannelAvatar(ctx context.Context, channelID string) (string, error) {
+	key := channelAvatarKey + channelID
+	return r.client.Get(ctx, key).Result()
 }
