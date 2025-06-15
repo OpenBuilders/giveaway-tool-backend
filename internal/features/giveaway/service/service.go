@@ -573,6 +573,11 @@ func (s *giveawayService) toResponse(ctx context.Context, giveaway *models.Givea
 		response.Winners = winners
 	}
 
+	// Гарантируем, что sponsors всегда [] (а не null)
+	if response.Sponsors == nil {
+		response.Sponsors = make([]models.ChannelInfo, 0)
+	}
+
 	if s.debug {
 		log.Printf("[DEBUG] Successfully converted giveaway %s to response", giveaway.ID)
 	}
