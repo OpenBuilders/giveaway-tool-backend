@@ -2,9 +2,10 @@ package http
 
 import (
 	"fmt"
+	channelservice "giveaway-tool-backend/internal/features/channel/service"
 	"giveaway-tool-backend/internal/features/giveaway/models"
 	"giveaway-tool-backend/internal/features/giveaway/models/dto"
-	"giveaway-tool-backend/internal/features/giveaway/service"
+	giveawayservice "giveaway-tool-backend/internal/features/giveaway/service"
 	"giveaway-tool-backend/internal/platform/telegram"
 	"io"
 	"net/http"
@@ -28,14 +29,16 @@ func containsString(slice []string, item string) bool {
 }
 
 type GiveawayHandler struct {
-	service        service.GiveawayService
+	service        giveawayservice.GiveawayService
 	telegramClient *telegram.Client
+	channelService channelservice.ChannelService
 }
 
-func NewGiveawayHandler(service service.GiveawayService) *GiveawayHandler {
+func NewGiveawayHandler(service giveawayservice.GiveawayService, channelService channelservice.ChannelService) *GiveawayHandler {
 	return &GiveawayHandler{
 		service:        service,
 		telegramClient: telegram.NewClient(),
+		channelService: channelService,
 	}
 }
 
@@ -77,7 +80,7 @@ func (h *GiveawayHandler) RegisterRoutes(router *gin.RouterGroup) {
 	channels := router.Group("/channels")
 	{
 		channels.GET("/me", h.getUserChannels)
-		channels.GET("/:username/info", h.GetPublicChannelInfo)
+		channels.GET("/:username/info", h.getPublicChannelInfo)
 	}
 
 	// Add route for checking bot existence in a channel
@@ -289,9 +292,9 @@ func (h *GiveawayHandler) update(c *gin.Context) {
 	giveaway, err := h.service.Update(c.Request.Context(), userData.ID, c.Param("id"), &input)
 	if err != nil {
 		switch err {
-		case service.ErrNotFound:
+		case giveawayservice.ErrNotFound:
 			c.JSON(http.StatusNotFound, gin.H{"error": "giveaway not found"})
-		case service.ErrNotOwner:
+		case giveawayservice.ErrNotOwner:
 			c.JSON(http.StatusForbidden, gin.H{"error": "you are not the owner of this giveaway"})
 		case models.ErrGiveawayNotEditable:
 			c.JSON(http.StatusBadRequest, gin.H{"error": "giveaway can only be edited within first 5 minutes"})
@@ -326,9 +329,9 @@ func (h *GiveawayHandler) delete(c *gin.Context) {
 	err := h.service.Delete(c.Request.Context(), userData.ID, c.Param("id"))
 	if err != nil {
 		switch err {
-		case service.ErrNotFound:
+		case giveawayservice.ErrNotFound:
 			c.JSON(http.StatusNotFound, gin.H{"error": "giveaway not found"})
-		case service.ErrNotOwner:
+		case giveawayservice.ErrNotOwner:
 			c.JSON(http.StatusForbidden, gin.H{"error": "you are not the owner of this giveaway"})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -483,9 +486,9 @@ func (h *GiveawayHandler) getWinners(c *gin.Context) {
 	winners, err := h.service.GetWinners(c.Request.Context(), userData.ID, c.Param("id"))
 	if err != nil {
 		switch err {
-		case service.ErrNotFound:
+		case giveawayservice.ErrNotFound:
 			c.JSON(http.StatusNotFound, gin.H{"error": "giveaway not found"})
-		case service.ErrNotOwner:
+		case giveawayservice.ErrNotOwner:
 			c.JSON(http.StatusForbidden, gin.H{"error": "only creator can view winners"})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -615,9 +618,9 @@ func (h *GiveawayHandler) moveToHistory(c *gin.Context) {
 	err := h.service.MoveToHistory(c.Request.Context(), userData.ID, c.Param("id"))
 	if err != nil {
 		switch err {
-		case service.ErrNotFound:
+		case giveawayservice.ErrNotFound:
 			c.JSON(http.StatusNotFound, gin.H{"error": "giveaway not found"})
-		case service.ErrNotOwner:
+		case giveawayservice.ErrNotOwner:
 			c.JSON(http.StatusForbidden, gin.H{"error": "you are not the owner of this giveaway"})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -788,9 +791,9 @@ func (h *GiveawayHandler) cancelGiveaway(c *gin.Context) {
 	err := h.service.CancelGiveaway(c.Request.Context(), userData.ID, c.Param("id"))
 	if err != nil {
 		switch err {
-		case service.ErrNotFound:
+		case giveawayservice.ErrNotFound:
 			c.JSON(http.StatusNotFound, gin.H{"error": "giveaway not found"})
-		case service.ErrNotOwner:
+		case giveawayservice.ErrNotOwner:
 			c.JSON(http.StatusForbidden, gin.H{"error": "you are not the owner of this giveaway"})
 		default:
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -826,9 +829,9 @@ func (h *GiveawayHandler) recreateGiveaway(c *gin.Context) {
 	giveaway, err := h.service.RecreateGiveaway(c.Request.Context(), userData.ID, c.Param("id"))
 	if err != nil {
 		switch err {
-		case service.ErrNotFound:
+		case giveawayservice.ErrNotFound:
 			c.JSON(http.StatusNotFound, gin.H{"error": "giveaway not found"})
-		case service.ErrNotOwner:
+		case giveawayservice.ErrNotOwner:
 			c.JSON(http.StatusForbidden, gin.H{"error": "you are not the owner of this giveaway"})
 		default:
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -956,7 +959,7 @@ func (h *GiveawayHandler) checkRequirements(c *gin.Context) {
 	results, err := h.service.CheckRequirements(c.Request.Context(), userData.ID, c.Param("id"))
 	if err != nil {
 		switch err {
-		case service.ErrNotFound:
+		case giveawayservice.ErrNotFound:
 			c.JSON(http.StatusNotFound, gin.H{"error": "giveaway not found"})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -990,37 +993,38 @@ func (h *GiveawayHandler) getUserChannels(c *gin.Context) {
 		return
 	}
 
-	channelIDs, err := h.service.GetUserChannels(c.Request.Context(), userID)
+	channels, err := h.channelService.GetUserChannels(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to get user channels"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get user channels"})
 		return
 	}
 
-	channels := make([]ChannelInfo, 0, len(channelIDs))
-	for _, channelID := range channelIDs {
-		title, _ := h.service.GetChannelTitle(c.Request.Context(), channelID)
-		username, _ := h.service.GetChannelUsername(c.Request.Context(), channelID)
+	response := make([]ChannelInfo, 0, len(channels))
+	for _, channelID := range channels {
+		title, err := h.channelService.GetChannelTitle(c.Request.Context(), channelID)
+		if err != nil {
+			continue
+		}
 
-		channelInfo := ChannelInfo{
+		username, err := h.channelService.GetChannelUsername(c.Request.Context(), channelID)
+		if err != nil {
+			continue
+		}
+
+		avatarURL, err := h.channelService.GetChannelAvatar(c.Request.Context(), channelID)
+		if err != nil {
+			continue
+		}
+
+		response = append(response, ChannelInfo{
 			ID:         channelID,
 			Title:      title,
-			ChannelURL: fmt.Sprintf("https://t.me/%s", username),
-		}
-
-		// Если есть username, пробуем получить аватар
-		if username != "" {
-			info, err := h.service.GetPublicChannelInfo(c.Request.Context(), username)
-			if err == nil {
-				channelInfo.AvatarURL = info.AvatarURL
-			}
-		}
-
-		channels = append(channels, channelInfo)
+			AvatarURL:  avatarURL,
+			ChannelURL: "https://t.me/" + username,
+		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"channels": channels,
-	})
+	c.JSON(http.StatusOK, gin.H{"channels": response})
 }
 
 // @Summary Check if a bot exists in a channel
@@ -1159,22 +1163,18 @@ type ErrorResponse struct {
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /channels/{username}/info [get]
-func (h *GiveawayHandler) GetPublicChannelInfo(c *gin.Context) {
+func (h *GiveawayHandler) getPublicChannelInfo(c *gin.Context) {
 	username := c.Param("username")
 	if username == "" {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "username is required"})
 		return
 	}
 
-	info, err := h.service.GetPublicChannelInfo(c.Request.Context(), username)
+	info, err := h.channelService.GetPublicChannelInfo(c.Request.Context(), username)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"username":    info.Username,
-		"channel_url": info.ChannelURL,
-		"avatar_url":  info.AvatarURL,
-	})
+	c.JSON(http.StatusOK, info)
 }

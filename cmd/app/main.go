@@ -6,6 +6,9 @@ import (
 	"giveaway-tool-backend/internal/common/config"
 	"giveaway-tool-backend/internal/common/logger"
 	"giveaway-tool-backend/internal/common/middleware"
+	channelhttp "giveaway-tool-backend/internal/features/channel/delivery/http"
+	channelredis "giveaway-tool-backend/internal/features/channel/repository/redis"
+	channelservice "giveaway-tool-backend/internal/features/channel/service"
 	giveawayhttp "giveaway-tool-backend/internal/features/giveaway/delivery/http"
 	giveawayredis "giveaway-tool-backend/internal/features/giveaway/repository/redis"
 	giveawayservice "giveaway-tool-backend/internal/features/giveaway/service"
@@ -91,11 +94,13 @@ func main() {
 	// Initialize repositories
 	userRepository := userredis.NewUserRepository(rdb)
 	giveawayRepository := giveawayredis.NewRedisGiveawayRepository(rdb)
+	channelRepository := channelredis.NewRedisChannelRepository(rdb)
 	// tonProofRepository := tonproofredis.NewRepository(rdb)
 
 	// Initialize services
 	userSvc := userservice.NewUserService(userRepository)
 	giveawaySvc := giveawayservice.NewGiveawayService(giveawayRepository, rdb, cfg.Debug)
+	channelSvc := channelservice.NewChannelService(channelRepository, rdb, cfg.Debug)
 	// tonProofSvc := tonproofservice.NewService(tonProofRepository)
 	telegramClient := telegram.NewClient()
 	completionService := giveawayservice.NewCompletionService(giveawayRepository, telegramClient)
@@ -112,7 +117,8 @@ func main() {
 
 	// Initialize HTTP handlers
 	userHandler := userhttp.NewUserHandler(userSvc)
-	giveawayHandler := giveawayhttp.NewGiveawayHandler(giveawaySvc)
+	giveawayHandler := giveawayhttp.NewGiveawayHandler(giveawaySvc, channelSvc)
+	channelHandler := channelhttp.NewChannelHandler(channelSvc)
 	// tonProofHandler := tonproofhttp.NewHandler(tonProofSvc)
 
 	// Initialize Gin router
@@ -143,6 +149,7 @@ func main() {
 	{
 		userHandler.RegisterRoutes(v1)
 		giveawayHandler.RegisterRoutes(v1)
+		channelHandler.RegisterRoutes(v1)
 		// tonProofHandler.RegisterRoutes(v1)
 	}
 

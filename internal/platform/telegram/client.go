@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"giveaway-tool-backend/internal/features/giveaway/models"
-	"giveaway-tool-backend/internal/features/giveaway/repository"
 	"io"
 	"log"
 	"net/http"
@@ -59,6 +58,11 @@ type PublicChannelInfo struct {
 	Username   string `json:"username"`
 	ChannelURL string `json:"channel_url"`
 	AvatarURL  string `json:"avatar_url"`
+}
+
+// ChannelAvatarRepository определяет методы для работы с аватарами каналов
+type ChannelAvatarRepository interface {
+	SetChannelAvatar(ctx context.Context, username string, avatarURL string) error
 }
 
 func NewClient() *Client {
@@ -513,8 +517,8 @@ func (c *Client) CheckBoost(ctx context.Context, userID int64, chatID string) (b
 	return len(response.Result.Boosts) > 0, nil
 }
 
-func (c *Client) GetPublicChannelInfo(ctx context.Context, username string, repo repository.GiveawayRepository) (*PublicChannelInfo, error) {
-
+// GetPublicChannelInfo получает публичную информацию о канале
+func (c *Client) GetPublicChannelInfo(ctx context.Context, username string, repo ChannelAvatarRepository) (*PublicChannelInfo, error) {
 	username = strings.TrimPrefix(username, "@")
 
 	avatarURL := fmt.Sprintf("https://t.me/i/userpic/320/%s.jpg", username)
