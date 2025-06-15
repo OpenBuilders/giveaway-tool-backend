@@ -146,48 +146,31 @@ func (s *giveawayService) Create(ctx context.Context, userID int64, input *model
 		}
 	}
 
-	// Обработка спонсоров: сначала пробуем взять ChannelInfo из Redis, если нет — достаем через сервис каналов
-	var sponsors []models.ChannelInfo
+	// Валидация sponsors
+	if len(input.Sponsors) > 3 {
+		return nil, fmt.Errorf("maximum 3 sponsors allowed")
+	}
+	seenIDs := make(map[int64]struct{})
+	seenUsernames := make(map[string]struct{})
 	for _, sponsor := range input.Sponsors {
-		var info *models.ChannelInfo
-		var err error
 		if sponsor.ID != 0 {
-			info, err = s.channelService.GetChannelInfoByID(ctx, sponsor.ID)
-			if err != nil || info == nil {
-				title, _ := s.channelService.GetChannelTitle(ctx, sponsor.ID)
-				username, _ := s.channelService.GetChannelUsername(ctx, sponsor.ID)
-				avatarURL, _ := s.channelService.GetChannelAvatar(ctx, sponsor.ID)
-				channelURL := ""
-				if username != "" {
-					channelURL = "https://t.me/" + username
-				}
-				info = &models.ChannelInfo{
-					ID:         sponsor.ID,
-					Title:      title,
-					AvatarURL:  avatarURL,
-					ChannelURL: channelURL,
-					Username:   username,
-				}
+			if sponsor.ID < 0 || len(fmt.Sprintf("%d", sponsor.ID)) > 100 {
+				return nil, fmt.Errorf("invalid sponsor id: %d", sponsor.ID)
 			}
-		} else if sponsor.Username != "" {
-			info, err = s.channelService.GetChannelInfoByUsername(ctx, sponsor.Username)
-			if err != nil || info == nil {
-				pubInfo, err := s.channelService.GetPublicChannelInfo(ctx, sponsor.Username)
-				if err != nil {
-					continue
-				}
-				info = &models.ChannelInfo{
-					ID:         pubInfo.ID,
-					Title:      pubInfo.Title,
-					AvatarURL:  pubInfo.AvatarURL,
-					ChannelURL: pubInfo.ChannelURL,
-					Username:   pubInfo.Username,
-				}
+			if _, exists := seenIDs[sponsor.ID]; exists {
+				return nil, fmt.Errorf("duplicate sponsor id: %d", sponsor.ID)
 			}
-		} else {
-			continue
+			seenIDs[sponsor.ID] = struct{}{}
 		}
-		sponsors = append(sponsors, *info)
+		if sponsor.Username != "" {
+			if len(sponsor.Username) > 100 {
+				return nil, fmt.Errorf("sponsor username too long: %s", sponsor.Username)
+			}
+			if _, exists := seenUsernames[sponsor.Username]; exists {
+				return nil, fmt.Errorf("duplicate sponsor username: %s", sponsor.Username)
+			}
+			seenUsernames[sponsor.Username] = struct{}{}
+		}
 	}
 
 	giveaway := &models.Giveaway{
@@ -207,7 +190,7 @@ func (s *giveawayService) Create(ctx context.Context, userID int64, input *model
 		AllowTickets:    input.AllowTickets,
 		Requirements:    input.Requirements,
 		MsgID:           0,
-		Sponsors:        sponsors,
+		Sponsors:        input.Sponsors,
 	}
 
 	if err := s.repo.Create(ctx, giveaway); err != nil {
@@ -246,6 +229,35 @@ func (s *giveawayService) Update(ctx context.Context, userID int64, giveawayID s
 	}
 	if len(input.Prizes) > 0 {
 		giveaway.Prizes = input.Prizes
+	}
+	// Валидация sponsors при обновлении
+	if input.Sponsors != nil && len(input.Sponsors) > 0 {
+		if len(input.Sponsors) > 3 {
+			return nil, fmt.Errorf("maximum 3 sponsors allowed")
+		}
+		seenIDs := make(map[int64]struct{})
+		seenUsernames := make(map[string]struct{})
+		for _, sponsor := range input.Sponsors {
+			if sponsor.ID != 0 {
+				if sponsor.ID < 0 || len(fmt.Sprintf("%d", sponsor.ID)) > 100 {
+					return nil, fmt.Errorf("invalid sponsor id: %d", sponsor.ID)
+				}
+				if _, exists := seenIDs[sponsor.ID]; exists {
+					return nil, fmt.Errorf("duplicate sponsor id: %d", sponsor.ID)
+				}
+				seenIDs[sponsor.ID] = struct{}{}
+			}
+			if sponsor.Username != "" {
+				if len(sponsor.Username) > 100 {
+					return nil, fmt.Errorf("sponsor username too long: %s", sponsor.Username)
+				}
+				if _, exists := seenUsernames[sponsor.Username]; exists {
+					return nil, fmt.Errorf("duplicate sponsor username: %s", sponsor.Username)
+				}
+				seenUsernames[sponsor.Username] = struct{}{}
+			}
+		}
+		giveaway.Sponsors = input.Sponsors
 	}
 
 	giveaway.UpdatedAt = time.Now()

@@ -168,9 +168,10 @@ type GiveawayCreate struct {
 }
 
 type GiveawayUpdate struct {
-	Title       *string      `json:"title,omitempty" binding:"omitempty,min=3,max=100"`
-	Description *string      `json:"description,omitempty" binding:"omitempty,min=10,max=1000"`
-	Prizes      []PrizePlace `json:"prizes,omitempty" binding:"omitempty,dive"`
+	Title       *string       `json:"title,omitempty" binding:"omitempty,min=3,max=100"`
+	Description *string       `json:"description,omitempty" binding:"omitempty,min=10,max=1000"`
+	Prizes      []PrizePlace  `json:"prizes,omitempty" binding:"omitempty,dive"`
+	Sponsors    []ChannelInfo `json:"sponsors,omitempty"`
 }
 
 type GiveawayResponse struct {
