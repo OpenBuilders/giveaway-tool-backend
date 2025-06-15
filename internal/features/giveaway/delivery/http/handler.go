@@ -85,6 +85,7 @@ func (h *GiveawayHandler) RegisterRoutes(router *gin.RouterGroup) {
 
 	// Add route for checking bot existence in a channel
 	router.POST("/bot/check", h.checkBotInChannel)
+	router.POST("/bot/check-bulk", h.checkBotInChannelsBulk)
 }
 
 // @title Giveaway API
@@ -1177,4 +1178,81 @@ func (h *GiveawayHandler) getPublicChannelInfo(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, info)
+}
+
+// BulkBotCheckRequest описывает входные данные для bulk-проверки
+type BulkBotCheckRequest struct {
+	Usernames []string `json:"usernames"`
+}
+
+// BulkBotCheckResult описывает результат для одного канала
+type BulkBotCheckResult struct {
+	Username  string      `json:"username"`
+	Ok        bool        `json:"ok"`
+	Channel   interface{} `json:"channel,omitempty"`
+	BotStatus interface{} `json:"bot_status,omitempty"`
+	Error     string      `json:"error,omitempty"`
+}
+
+// @Summary Bulk check if a bot exists in channels
+// @Description Check if the Telegram bot exists in multiple channels and has access to member information
+// @Tags bot
+// @Accept json
+// @Produce json
+// @Security TelegramInitData
+// @Param request body BulkBotCheckRequest true "Request with channel usernames"
+// @Success 200 {object} map[string][]BulkBotCheckResult
+// @Failure 400 {object} models.ErrorResponse "Bad request"
+// @Failure 401 {object} models.ErrorResponse "Unauthorized"
+// @Failure 500 {object} models.ErrorResponse "Internal server error"
+// @Router /bot/check-bulk [post]
+func (h *GiveawayHandler) checkBotInChannelsBulk(c *gin.Context) {
+	_, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+		return
+	}
+
+	var req BulkBotCheckRequest
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.Usernames) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request format or empty usernames"})
+		return
+	}
+
+	results := make([]BulkBotCheckResult, 0, len(req.Usernames))
+	for _, username := range req.Usernames {
+		uname := username
+		if uname == "" {
+			results = append(results, BulkBotCheckResult{Username: username, Ok: false, Error: "Empty username"})
+			continue
+		}
+		if uname[0] != '@' {
+			uname = "@" + uname
+		}
+		chat, err := h.telegramClient.GetChat(uname)
+		if err != nil {
+			results = append(results, BulkBotCheckResult{Username: username, Ok: false, Error: "Channel not found or is not accessible"})
+			continue
+		}
+		chatMember, err := h.telegramClient.GetBotChatMember(fmt.Sprintf("%d", chat.ID))
+		if err != nil {
+			results = append(results, BulkBotCheckResult{Username: username, Ok: false, Error: "Bot is not a member of this channel"})
+			continue
+		}
+		results = append(results, BulkBotCheckResult{
+			Username: username,
+			Ok:       true,
+			Channel: gin.H{
+				"id":       chat.ID,
+				"type":     chat.Type,
+				"title":    chat.Title,
+				"username": chat.Username,
+			},
+			BotStatus: gin.H{
+				"status":            chatMember.Status,
+				"can_check_members": chatMember.CanInviteUsers,
+			},
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"results": results})
 }
