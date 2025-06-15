@@ -141,7 +141,35 @@ func (s *channelService) GetPublicChannelInfo(ctx context.Context, username stri
 }
 
 func (s *channelService) GetChannelInfoByID(ctx context.Context, channelID int64) (*models.ChannelInfo, error) {
-	return s.repo.GetChannelInfoByID(ctx, channelID)
+	// Сначала пробуем получить из Redis
+	info, err := s.repo.GetChannelInfoByID(ctx, channelID)
+	if err == nil && info != nil {
+		return info, nil
+	}
+
+	// Если нет в Redis, получаем username
+	username, err := s.repo.GetChannelUsername(ctx, channelID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Получаем полную информацию через Telegram API
+	pubInfo, err := s.telegramClient.GetPublicChannelInfo(ctx, username, s.repo)
+	if err != nil {
+		return nil, err
+	}
+
+	// Сохраняем в Redis
+	info = &models.ChannelInfo{
+		ID:         pubInfo.ID,
+		Username:   pubInfo.Username,
+		Title:      pubInfo.Title,
+		AvatarURL:  pubInfo.AvatarURL,
+		ChannelURL: pubInfo.ChannelURL,
+	}
+	_ = s.repo.SetChannelInfo(ctx, *info)
+
+	return info, nil
 }
 
 func (s *channelService) GetChannelInfoByUsername(ctx context.Context, username string) (*models.ChannelInfo, error) {
