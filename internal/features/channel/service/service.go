@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"giveaway-tool-backend/internal/features/channel/repository"
 	channelredis "giveaway-tool-backend/internal/features/channel/repository/redis"
+	"giveaway-tool-backend/internal/features/giveaway/models"
 	"giveaway-tool-backend/internal/platform/telegram"
 	"log"
 	"strconv"
@@ -18,6 +19,8 @@ type ChannelService interface {
 	GetChannelTitle(ctx context.Context, channelID int64) (string, error)
 	GetChannelUsername(ctx context.Context, channelID int64) (string, error)
 	GetPublicChannelInfo(ctx context.Context, username string) (*telegram.PublicChannelInfo, error)
+	GetChannelInfoByID(ctx context.Context, channelID int64) (*models.ChannelInfo, error)
+	GetChannelInfoByUsername(ctx context.Context, username string) (*models.ChannelInfo, error)
 }
 
 type channelService struct {
@@ -119,5 +122,28 @@ func (s *channelService) GetChannelUsername(ctx context.Context, channelID int64
 
 // GetPublicChannelInfo получает публичную информацию о канале
 func (s *channelService) GetPublicChannelInfo(ctx context.Context, username string) (*telegram.PublicChannelInfo, error) {
-	return s.telegramClient.GetPublicChannelInfo(ctx, username, s.repo)
+	pubInfo, err := s.telegramClient.GetPublicChannelInfo(ctx, username, s.repo)
+	if err != nil {
+		return nil, err
+	}
+
+	// Сохраняем всю структуру ChannelInfo в Redis
+	info := models.ChannelInfo{
+		ID:         pubInfo.ID,
+		Username:   pubInfo.Username,
+		Title:      pubInfo.Title,
+		AvatarURL:  pubInfo.AvatarURL,
+		ChannelURL: pubInfo.ChannelURL,
+	}
+	_ = s.repo.SetChannelInfo(ctx, info)
+
+	return pubInfo, nil
+}
+
+func (s *channelService) GetChannelInfoByID(ctx context.Context, channelID int64) (*models.ChannelInfo, error) {
+	return s.repo.GetChannelInfoByID(ctx, channelID)
+}
+
+func (s *channelService) GetChannelInfoByUsername(ctx context.Context, username string) (*models.ChannelInfo, error) {
+	return s.repo.GetChannelInfoByUsername(ctx, username)
 }

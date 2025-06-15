@@ -146,41 +146,48 @@ func (s *giveawayService) Create(ctx context.Context, userID int64, input *model
 		}
 	}
 
-	// Обработка спонсоров: если передан только id или только username, достаем остальные данные из Redis или Telegram API
+	// Обработка спонсоров: сначала пробуем взять ChannelInfo из Redis, если нет — достаем через сервис каналов
 	var sponsors []models.ChannelInfo
 	for _, sponsor := range input.Sponsors {
-		var info models.ChannelInfo
+		var info *models.ChannelInfo
+		var err error
 		if sponsor.ID != 0 {
-			title, _ := s.channelService.GetChannelTitle(ctx, sponsor.ID)
-			username, _ := s.channelService.GetChannelUsername(ctx, sponsor.ID)
-			avatarURL, _ := s.channelService.GetChannelAvatar(ctx, sponsor.ID)
-			channelURL := ""
-			if username != "" {
-				channelURL = "https://t.me/" + username
-			}
-			info = models.ChannelInfo{
-				ID:         sponsor.ID,
-				Title:      title,
-				AvatarURL:  avatarURL,
-				ChannelURL: channelURL,
-				Username:   username,
+			info, err = s.channelService.GetChannelInfoByID(ctx, sponsor.ID)
+			if err != nil || info == nil {
+				title, _ := s.channelService.GetChannelTitle(ctx, sponsor.ID)
+				username, _ := s.channelService.GetChannelUsername(ctx, sponsor.ID)
+				avatarURL, _ := s.channelService.GetChannelAvatar(ctx, sponsor.ID)
+				channelURL := ""
+				if username != "" {
+					channelURL = "https://t.me/" + username
+				}
+				info = &models.ChannelInfo{
+					ID:         sponsor.ID,
+					Title:      title,
+					AvatarURL:  avatarURL,
+					ChannelURL: channelURL,
+					Username:   username,
+				}
 			}
 		} else if sponsor.Username != "" {
-			pubInfo, err := s.channelService.GetPublicChannelInfo(ctx, sponsor.Username)
-			if err != nil {
-				continue
-			}
-			info = models.ChannelInfo{
-				ID:         pubInfo.ID,
-				Title:      pubInfo.Title,
-				AvatarURL:  pubInfo.AvatarURL,
-				ChannelURL: pubInfo.ChannelURL,
-				Username:   pubInfo.Username,
+			info, err = s.channelService.GetChannelInfoByUsername(ctx, sponsor.Username)
+			if err != nil || info == nil {
+				pubInfo, err := s.channelService.GetPublicChannelInfo(ctx, sponsor.Username)
+				if err != nil {
+					continue
+				}
+				info = &models.ChannelInfo{
+					ID:         pubInfo.ID,
+					Title:      pubInfo.Title,
+					AvatarURL:  pubInfo.AvatarURL,
+					ChannelURL: pubInfo.ChannelURL,
+					Username:   pubInfo.Username,
+				}
 			}
 		} else {
 			continue
 		}
-		sponsors = append(sponsors, info)
+		sponsors = append(sponsors, *info)
 	}
 
 	giveaway := &models.Giveaway{
