@@ -1016,7 +1016,7 @@ func (r *redisRepository) UpdateStatusAtomic(ctx context.Context, tx repository.
 	return nil
 }
 
-// GetTopGiveaways returns top giveaways by participants count
+// GetTopGiveaways returns top giveaways by participants count, then by soonest end time
 func (r *redisRepository) GetTopGiveaways(ctx context.Context, limit int) ([]*models.Giveaway, error) {
 	// Get all active and pending giveaways
 	activeIDs, err := r.client.SMembers(ctx, keyActiveGiveaways).Result()
@@ -1032,28 +1032,31 @@ func (r *redisRepository) GetTopGiveaways(ctx context.Context, limit int) ([]*mo
 	// Combine IDs
 	allIDs := append(activeIDs, pendingIDs...)
 
-	// Create a map to store giveaway ID -> participants count
-	giveawayScores := make(map[string]int64)
-
-	// Get participants count for each giveaway
+	// Собираем данные по каждому гиву
+	type giveawayScore struct {
+		id     string
+		score  int64
+		endsAt int64 // unix timestamp
+	}
+	scores := make([]giveawayScore, 0, len(allIDs))
 	for _, id := range allIDs {
 		count, err := r.GetParticipantsCount(ctx, id)
 		if err != nil {
 			continue
 		}
-		giveawayScores[id] = count
+		giveaway, err := r.GetByID(ctx, id)
+		if err != nil {
+			continue
+		}
+		endsAt := giveaway.StartedAt.Unix() + giveaway.Duration
+		scores = append(scores, giveawayScore{id: id, score: count, endsAt: endsAt})
 	}
 
-	// Sort giveaways by participants count
-	type giveawayScore struct {
-		id    string
-		score int64
-	}
-	scores := make([]giveawayScore, 0, len(giveawayScores))
-	for id, score := range giveawayScores {
-		scores = append(scores, giveawayScore{id: id, score: score})
-	}
+	// Сортируем: сначала по количеству участников (desc), потом по endsAt (asc)
 	sort.Slice(scores, func(i, j int) bool {
+		if scores[i].score == scores[j].score {
+			return scores[i].endsAt < scores[j].endsAt
+		}
 		return scores[i].score > scores[j].score
 	})
 
