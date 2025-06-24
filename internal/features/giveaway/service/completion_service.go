@@ -175,19 +175,23 @@ func (s *CompletionService) processGiveaway(giveawayID string) error {
 		return s.handleNoParticipants(ctx, tx, giveaway)
 	}
 
+	// Adjust winners count if there are fewer participants
 	if len(participants) < giveaway.WinnersCount {
 		giveaway.WinnersCount = len(participants)
 	}
 
-	winners, err := s.selectWinners(ctx, tx, giveaway)
+	// Step 1: Select winners
+	winners, err := s.selectWinners(ctx, tx, giveaway, participants)
 	if err != nil {
 		return fmt.Errorf("failed to select winners: %w", err)
 	}
 
-	if err := s.createWinRecords(ctx, tx, giveaway, winners); err != nil {
-		return fmt.Errorf("failed to create win records: %w", err)
+	// Step 2: Create win records and distribute prizes
+	if err := s.createWinRecordsAndDistributePrizes(ctx, tx, giveaway, winners); err != nil {
+		return fmt.Errorf("failed to create win records and distribute prizes: %w", err)
 	}
 
+	// Step 3: Update giveaway status
 	giveaway.Status = models.GiveawayStatusCompleted
 	giveaway.UpdatedAt = time.Now()
 	if err := s.repo.UpdateTx(ctx, tx, giveaway); err != nil {
@@ -202,7 +206,8 @@ func (s *CompletionService) processGiveaway(giveawayID string) error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	go s.notifyWinners(winners, giveaway)
+	// Step 4: Send notifications (asynchronously)
+	go s.sendNotifications(giveaway, winners)
 
 	return nil
 }
@@ -222,11 +227,13 @@ func (s *CompletionService) handleNoParticipants(ctx context.Context, tx reposit
 	return tx.Commit()
 }
 
-func (s *CompletionService) selectWinners(ctx context.Context, tx repository.Transaction, giveaway *models.Giveaway) ([]models.Winner, error) {
+func (s *CompletionService) selectWinners(ctx context.Context, tx repository.Transaction, giveaway *models.Giveaway, participants []int64) ([]models.Winner, error) {
 	if !giveaway.AllowTickets {
-		return s.repo.SelectWinnersTx(ctx, tx, giveaway.ID, giveaway.WinnersCount)
+		// Standard random selection
+		return s.selectWinnersRandom(ctx, tx, giveaway, participants)
 	}
 
+	// Selection with tickets
 	tickets, err := s.repo.GetAllTicketsTx(ctx, tx, giveaway.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tickets: %w", err)
@@ -235,47 +242,40 @@ func (s *CompletionService) selectWinners(ctx context.Context, tx repository.Tra
 	return s.selectWinnersWithTickets(ctx, tx, giveaway, tickets)
 }
 
-func (s *CompletionService) createWinRecords(ctx context.Context, tx repository.Transaction, giveaway *models.Giveaway, winners []models.Winner) error {
-	for _, winner := range winners {
-		prizePlace := giveaway.Prizes[winner.Place-1]
+func (s *CompletionService) selectWinnersRandom(ctx context.Context, tx repository.Transaction, giveaway *models.Giveaway, participants []int64) ([]models.Winner, error) {
+	winners := make([]models.Winner, 0, giveaway.WinnersCount)
+	selectedUsers := make(map[int64]bool)
 
-		record := &models.WinRecord{
-			ID:         uuid.New().String(),
-			GiveawayID: giveaway.ID,
-			UserID:     winner.UserID,
-			PrizeID:    prizePlace.PrizeID,
-			Place:      winner.Place,
-			Status:     models.PrizeStatusPending,
-			CreatedAt:  time.Now(),
-			UpdatedAt:  time.Now(),
+	for place := 1; place <= giveaway.WinnersCount; place++ {
+		if len(participants) == 0 {
+			break
 		}
 
-		if err := s.repo.CreateWinRecordTx(ctx, tx, record); err != nil {
-			return fmt.Errorf("failed to create win record: %w", err)
+		// Select random participant
+		idx := rand.Intn(len(participants))
+		userID := participants[idx]
+
+		// Get user info
+		user, err := s.repo.GetUser(ctx, userID)
+		if err != nil {
+			s.logger.Printf("Failed to get user info for %d: %v", userID, err)
+			// Remove this participant and continue
+			participants = append(participants[:idx], participants[idx+1:]...)
+			continue
 		}
 
-		if giveaway.AutoDistribute {
-			prize, err := s.repo.GetPrizeTx(ctx, tx, record.PrizeID)
-			if err != nil {
-				return fmt.Errorf("failed to get prize: %w", err)
-			}
+		winners = append(winners, models.Winner{
+			UserID:   userID,
+			Username: user.Username,
+			Place:    place,
+		})
+		selectedUsers[userID] = true
 
-			if prize.IsInternal {
-				if err := s.repo.DistributePrizeTx(ctx, tx, giveaway.ID, winner.UserID, prize.ID); err != nil {
-					return fmt.Errorf("failed to distribute prize: %w", err)
-				}
-
-				now := time.Now()
-				record.Status = models.PrizeStatusDistributed
-				record.ReceivedAt = &now
-				if err := s.repo.UpdateWinRecordTx(ctx, tx, record); err != nil {
-					return fmt.Errorf("failed to update win record: %w", err)
-				}
-			}
-		}
+		// Remove selected participant
+		participants = append(participants[:idx], participants[idx+1:]...)
 	}
 
-	return nil
+	return winners, nil
 }
 
 func (s *CompletionService) selectWinnersWithTickets(ctx context.Context, tx repository.Transaction, giveaway *models.Giveaway, tickets map[int64]int) ([]models.Winner, error) {
@@ -330,7 +330,15 @@ func (s *CompletionService) selectWinnersWithTickets(ctx context.Context, tx rep
 
 		user, err := s.repo.GetUser(ctx, winnerUserID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get user info: %w", err)
+			s.logger.Printf("Failed to get user info for %d: %v", winnerUserID, err)
+			// Remove this user from pool and continue
+			for i, ticket := range ticketPool {
+				if ticket.UserID == winnerUserID {
+					ticketPool = append(ticketPool[:i], ticketPool[i+1:]...)
+					break
+				}
+			}
+			continue
 		}
 
 		winners = append(winners, models.Winner{
@@ -344,25 +352,100 @@ func (s *CompletionService) selectWinnersWithTickets(ctx context.Context, tx rep
 	return winners, nil
 }
 
-func (s *CompletionService) notifyWinners(winners []models.Winner, giveaway *models.Giveaway) {
+func (s *CompletionService) createWinRecordsAndDistributePrizes(ctx context.Context, tx repository.Transaction, giveaway *models.Giveaway, winners []models.Winner) error {
+	var customPrizes []models.Winner // Track custom prizes for creator notification
+
+	for _, winner := range winners {
+		// Get prize for this place
+		prize, err := s.getPrizeForPlace(ctx, tx, giveaway, winner.Place)
+		if err != nil {
+			s.logger.Printf("Failed to get prize for place %d: %v", winner.Place, err)
+			continue
+		}
+
+		// Create win record
+		record := &models.WinRecord{
+			ID:         uuid.New().String(),
+			GiveawayID: giveaway.ID,
+			UserID:     winner.UserID,
+			PrizeID:    prize.ID,
+			Place:      winner.Place,
+			Status:     models.PrizeStatusPending,
+			CreatedAt:  time.Now(),
+			UpdatedAt:  time.Now(),
+		}
+
+		if err := s.repo.CreateWinRecordTx(ctx, tx, record); err != nil {
+			return fmt.Errorf("failed to create win record: %w", err)
+		}
+
+		// Handle prize distribution based on type
+		if prize.Type == models.PrizeTypeCustom {
+			// Custom prizes are not distributed automatically
+			customPrizes = append(customPrizes, winner)
+		} else if giveaway.AutoDistribute && prize.IsInternal {
+			// Auto-distribute internal prizes
+			if err := s.repo.DistributePrizeTx(ctx, tx, giveaway.ID, winner.UserID, prize.ID); err != nil {
+				s.logger.Printf("Failed to distribute prize %s to user %d: %v", prize.ID, winner.UserID, err)
+			} else {
+				now := time.Now()
+				record.Status = models.PrizeStatusDistributed
+				record.ReceivedAt = &now
+				if err := s.repo.UpdateWinRecordTx(ctx, tx, record); err != nil {
+					s.logger.Printf("Failed to update win record: %v", err)
+				}
+			}
+		}
+	}
+
+	// Store custom prizes info for creator notification
+	if len(customPrizes) > 0 {
+		s.processing.Store(fmt.Sprintf("custom_prizes:%s", giveaway.ID), customPrizes)
+	}
+
+	return nil
+}
+
+func (s *CompletionService) getPrizeForPlace(ctx context.Context, tx repository.Transaction, giveaway *models.Giveaway, place int) (*models.Prize, error) {
+	if place <= 0 || place > len(giveaway.Prizes) {
+		return nil, fmt.Errorf("invalid place: %d", place)
+	}
+
+	prizePlace := giveaway.Prizes[place-1]
+	prize, err := s.repo.GetPrizeTx(ctx, tx, prizePlace.PrizeID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get prize %s: %w", prizePlace.PrizeID, err)
+	}
+
+	return prize, nil
+}
+
+func (s *CompletionService) sendNotifications(giveaway *models.Giveaway, winners []models.Winner) {
+	// Send notifications to winners
 	for _, winner := range winners {
 		if err := s.notifyWinner(winner, giveaway); err != nil {
 			s.logger.Printf("Failed to notify winner %d: %v", winner.UserID, err)
 		}
 	}
+
+	// Check if there are custom prizes and notify creator
+	if customPrizesData, exists := s.processing.Load(fmt.Sprintf("custom_prizes:%s", giveaway.ID)); exists {
+		if customPrizes, ok := customPrizesData.([]models.Winner); ok {
+			if err := s.notifyCreatorAboutCustomPrizes(giveaway, customPrizes); err != nil {
+				s.logger.Printf("Failed to notify creator about custom prizes: %v", err)
+			}
+		}
+		s.processing.Delete(fmt.Sprintf("custom_prizes:%s", giveaway.ID))
+	}
 }
 
 func (s *CompletionService) notifyWinner(winner models.Winner, giveaway *models.Giveaway) error {
-	if winner.Place <= 0 || winner.Place > len(giveaway.Prizes) {
-		return fmt.Errorf("invalid place: %d", winner.Place)
-	}
-
-	prizePlace := giveaway.Prizes[winner.Place-1]
-	prize, err := s.repo.GetPrize(s.ctx, prizePlace.PrizeID)
+	prize, err := s.getPrizeForPlace(s.ctx, nil, giveaway, winner.Place)
 	if err != nil {
 		return fmt.Errorf("failed to get prize info: %w", err)
 	}
 
+	// Create PrizeDetail for the existing NotifyWinner method
 	prizeDetail := models.PrizeDetail{
 		Type:        prize.Type,
 		Name:        prize.Name,
@@ -371,5 +454,28 @@ func (s *CompletionService) notifyWinner(winner models.Winner, giveaway *models.
 		Status:      string(models.PrizeStatusPending),
 	}
 
+	// Use the existing NotifyWinner method
 	return s.telegramClient.NotifyWinner(winner.UserID, giveaway, winner.Place, prizeDetail)
+}
+
+func (s *CompletionService) notifyCreatorAboutCustomPrizes(giveaway *models.Giveaway, customPrizes []models.Winner) error {
+	if len(customPrizes) == 0 {
+		return nil
+	}
+
+	// Use the new NotifyCreatorAboutCustomPrizes method
+	return s.telegramClient.NotifyCreatorAboutCustomPrizes(giveaway.CreatorID, giveaway, customPrizes)
+}
+
+func getPlaceSuffix(place int) string {
+	switch place {
+	case 1:
+		return "st"
+	case 2:
+		return "nd"
+	case 3:
+		return "rd"
+	default:
+		return "th"
+	}
 }

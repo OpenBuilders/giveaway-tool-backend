@@ -12,6 +12,7 @@ import (
 	giveawayhttp "giveaway-tool-backend/internal/features/giveaway/delivery/http"
 	giveawayredis "giveaway-tool-backend/internal/features/giveaway/repository/redis"
 	giveawayservice "giveaway-tool-backend/internal/features/giveaway/service"
+	redisplatform "giveaway-tool-backend/internal/platform/redis"
 
 	// tonproofhttp "giveaway-tool-backend/internal/features/tonproof/handler/http"
 	// tonproofredis "giveaway-tool-backend/internal/features/tonproof/repository/redis"
@@ -33,7 +34,6 @@ import (
 	"giveaway-tool-backend/internal/platform/telegram"
 
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 )
 
 // @title           Giveaway Tool API
@@ -77,12 +77,16 @@ func main() {
 	// Initialize logger
 	logger.Init("giveaway-tool", cfg.Debug)
 
-	// Initialize Redis client
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     fmt.Sprintf("%s:%d", cfg.Redis.Host, cfg.Redis.Port),
-		Password: cfg.Redis.Password,
-		DB:       cfg.Redis.DB,
-	})
+	// Initialize Redis client using factory
+	redisClient, err := redisplatform.CreateRedisClient(cfg)
+	if err != nil {
+		logger.Fatal().
+			Err(err).
+			Msg("Failed to create Redis client")
+	}
+
+	// Create adapter for compatibility with existing repositories
+	rdb := redisplatform.NewRedisAdapter(redisClient)
 
 	// Enable TTL notifications
 	if err := rdb.ConfigSet(context.Background(), "notify-keyspace-events", "Ex").Err(); err != nil {
@@ -91,16 +95,22 @@ func main() {
 			Msg("Failed to configure Redis notifications")
 	}
 
+	// Log Redis configuration
+	stats := redisplatform.GetShardStats(redisClient)
+	logger.Info().
+		Interface("redis_stats", stats).
+		Msg("Redis client initialized")
+
 	// Initialize repositories
-	userRepository := userredis.NewUserRepository(rdb)
-	giveawayRepository := giveawayredis.NewRedisGiveawayRepository(rdb)
-	channelRepository := channelredis.NewRedisChannelRepository(rdb)
+	userRepository := userredis.NewUserRepository(rdb.GetUnderlyingClient())
+	giveawayRepository := giveawayredis.NewRedisGiveawayRepository(rdb.GetUnderlyingClient())
+	channelRepository := channelredis.NewRedisChannelRepository(rdb.GetUnderlyingClient())
 	// tonProofRepository := tonproofredis.NewRepository(rdb)
 
 	// Initialize services
 	userSvc := userservice.NewUserService(userRepository)
-	channelSvc := channelservice.NewChannelService(channelRepository, rdb, cfg.Debug)
-	giveawaySvc := giveawayservice.NewGiveawayService(giveawayRepository, rdb, cfg.Debug, channelSvc)
+	channelSvc := channelservice.NewChannelService(channelRepository, rdb.GetUnderlyingClient(), cfg.Debug)
+	giveawaySvc := giveawayservice.NewGiveawayService(giveawayRepository, rdb.GetUnderlyingClient(), cfg.Debug, channelSvc)
 	// tonProofSvc := tonproofservice.NewService(tonProofRepository)
 	telegramClient := telegram.NewClient()
 	completionService := giveawayservice.NewCompletionService(giveawayRepository, telegramClient)
