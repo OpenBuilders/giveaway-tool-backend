@@ -3,12 +3,12 @@ package service
 import (
 	"context"
 	"fmt"
+	"giveaway-tool-backend/internal/common/config"
 	"giveaway-tool-backend/internal/features/giveaway/models"
 	"giveaway-tool-backend/internal/features/giveaway/repository"
 	"giveaway-tool-backend/internal/platform/telegram"
 	"log"
 	"math/rand"
-	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -29,6 +29,7 @@ type ExpirationService struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	repo       repository.GiveawayRepository
+	config     *config.Config
 	logger     *log.Logger
 	processing sync.Map
 	wg         sync.WaitGroup
@@ -62,14 +63,15 @@ func (h *histogram) Observe(value float64) {
 	h.values = append(h.values, value)
 }
 
-func NewExpirationService(repo repository.GiveawayRepository) *ExpirationService {
+func NewExpirationService(repo repository.GiveawayRepository, config *config.Config, logger *log.Logger) *ExpirationService {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ExpirationService{
 		ctx:              ctx,
 		cancel:           cancel,
 		repo:             repo,
-		logger:           log.New(os.Stdout, "[ExpirationService] ", log.LstdFlags),
-		processSemaphore: make(chan struct{}, maxConcurrentProcessing),
+		config:           config,
+		logger:           logger,
+		processSemaphore: make(chan struct{}, 10), // MaxConcurrentProcessing
 		metrics: &metrics{
 			ProcessingErrors:   &counter{},
 			ProcessingDuration: &histogram{values: make([]float64, 0)},
@@ -103,7 +105,7 @@ func (s *ExpirationService) Start() {
 	// Start periodic cleanup of inconsistent data
 	go func() {
 		defer s.wg.Done()
-		ticker := time.NewTicker(cleanupTimeout)
+		ticker := time.NewTicker(30 * time.Minute) // cleanupTimeout
 		defer ticker.Stop()
 
 		for {
@@ -162,16 +164,16 @@ func (s *ExpirationService) ProcessExpiredGiveaways() error {
 
 func (s *ExpirationService) processGiveawayWithRetry(ctx context.Context, giveawayID string) error {
 	var lastErr error
-	for attempt := 1; attempt <= maxRetries; attempt++ {
+	for attempt := 1; attempt <= 3; attempt++ { // maxRetries
 		if err := s.processGiveaway(ctx, giveawayID); err != nil {
 			lastErr = err
 			s.logger.Printf("Attempt %d failed: %v", attempt, err)
-			time.Sleep(retryInterval * time.Duration(attempt))
+			time.Sleep(time.Second * time.Duration(attempt)) // retryInterval
 			continue
 		}
 		return nil
 	}
-	return fmt.Errorf("failed after %d attempts: %w", maxRetries, lastErr)
+	return fmt.Errorf("failed after %d attempts: %w", 3, lastErr)
 }
 
 func (s *ExpirationService) processGiveaway(ctx context.Context, giveawayID string) error {

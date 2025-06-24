@@ -177,27 +177,27 @@ type GiveawayUpdate struct {
 }
 
 type GiveawayResponse struct {
-	ID                string         `json:"id"`
-	CreatorID         int64          `json:"creator_id"`
-	Title             string         `json:"title"`
-	Description       string         `json:"description"`
-	StartedAt         time.Time      `json:"started_at"`
-	EndsAt            time.Time      `json:"ends_at"`
-	MaxParticipants   int            `json:"max_participants,omitempty"`
-	WinnersCount      int            `json:"winners_count"`
-	Status            GiveawayStatus `json:"status"`
-	CreatedAt         time.Time      `json:"created_at"`
-	UpdatedAt         time.Time      `json:"updated_at"`
-	ParticipantsCount int64          `json:"participants_count"`
-	CanEdit           bool           `json:"can_edit"`
-	UserRole          string         `json:"user_role"` // owner, participant, user
-	Prizes            []PrizePlace   `json:"prizes,omitempty"`
-	Requirements      []Requirement  `json:"requirements"`
-	AutoDistribute    bool           `json:"auto_distribute,omitempty"`
-	Winners           []Winner       `json:"winners,omitempty"` // Только для завершенных розыгрышей
-	AllowTickets      bool           `json:"allow_tickets"`     // Разрешены ли билеты
-	MsgID             int64          `json:"msg_id"`
-	Sponsors          []ChannelInfo  `json:"sponsors"`
+	ID                string                       `json:"id"`
+	CreatorID         int64                        `json:"creator_id"`
+	Title             string                       `json:"title"`
+	Description       string                       `json:"description"`
+	StartedAt         time.Time                    `json:"started_at"`
+	EndsAt            time.Time                    `json:"ends_at"`
+	MaxParticipants   int                          `json:"max_participants,omitempty"`
+	WinnersCount      int                          `json:"winners_count"`
+	Status            GiveawayStatus               `json:"status"`
+	CreatedAt         time.Time                    `json:"created_at"`
+	UpdatedAt         time.Time                    `json:"updated_at"`
+	ParticipantsCount int64                        `json:"participants_count"`
+	CanEdit           bool                         `json:"can_edit"`
+	UserRole          string                       `json:"user_role"` // owner, participant, user
+	Prizes            []PrizePlace                 `json:"prizes,omitempty"`
+	Requirements      []RequirementWithChannelInfo `json:"requirements"`
+	AutoDistribute    bool                         `json:"auto_distribute,omitempty"`
+	Winners           []Winner                     `json:"winners,omitempty"` // Только для завершенных розыгрышей
+	AllowTickets      bool                         `json:"allow_tickets"`     // Разрешены ли билеты
+	MsgID             int64                        `json:"msg_id"`
+	Sponsors          []ChannelInfo                `json:"sponsors"`
 }
 
 // UnmarshalJSON implements json.Unmarshaler
@@ -261,25 +261,25 @@ func (g *GiveawayResponse) UnmarshalJSON(data []byte) error {
 
 	// Проверяем наличие поля requirements
 	if reqData, ok := rawMap["requirements"]; ok {
-		var reqs []Requirement
+		var reqs []RequirementWithChannelInfo
 		if err := json.Unmarshal(reqData, &reqs); err == nil {
 			g.Requirements = reqs
 		} else {
 			// Если не удалось распарсить как массив, пробуем как объект старого формата
 			var oldReqs struct {
-				Requirements []Requirement `json:"requirements"`
-				Enabled      bool          `json:"enabled"`
+				Requirements []RequirementWithChannelInfo `json:"requirements"`
+				Enabled      bool                         `json:"enabled"`
 			}
 			if err := json.Unmarshal(reqData, &oldReqs); err == nil {
 				g.Requirements = oldReqs.Requirements
 			} else {
 				// Если и это не удалось, просто оставляем пустой массив
-				g.Requirements = make([]Requirement, 0)
+				g.Requirements = make([]RequirementWithChannelInfo, 0)
 			}
 		}
 	} else {
 		// Если поля нет вообще, инициализируем пустым массивом
-		g.Requirements = make([]Requirement, 0)
+		g.Requirements = make([]RequirementWithChannelInfo, 0)
 	}
 
 	return nil
@@ -290,7 +290,7 @@ func (g *GiveawayResponse) MarshalJSON() ([]byte, error) {
 	type Alias GiveawayResponse
 	return json.Marshal(&struct {
 		*Alias
-		Requirements []Requirement `json:"requirements,omitempty"`
+		Requirements []RequirementWithChannelInfo `json:"requirements,omitempty"`
 	}{
 		Alias:        (*Alias)(g),
 		Requirements: g.Requirements,
@@ -385,5 +385,6 @@ type GiveawayStatusUpdate struct {
 type RequirementWithChannelInfo struct {
 	Type        string      `json:"type"`
 	Username    string      `json:"username"`
+	Description string      `json:"description,omitempty"`
 	ChannelInfo ChannelInfo `json:"channel_info"`
 }

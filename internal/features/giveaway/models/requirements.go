@@ -7,38 +7,33 @@ import (
 	"strings"
 )
 
-// Типы требований
 const (
-	RequirementTypeSubscription = "subscription" // Подписка на канал
-	RequirementTypeBoost        = "boost"        // Буст канала
-	RequirementTypeCustom       = "custom"       // Кастомное требование (ручная проверка)
+	RequirementTypeSubscription = "subscription"
+	RequirementTypeBoost        = "boost"
+	RequirementTypeCustom       = "custom"
 )
 
-// Шаблоны названий требований
 const (
-	RequirementNameTemplateSubscription = "Follow %s"  // Шаблон для подписки
-	RequirementNameTemplateBoost        = "Boost %s"   // Шаблон для буста
-	RequirementNameTemplateCustom       = "Custom: %s" // Шаблон для кастомного требования
+	RequirementNameTemplateSubscription = "Follow %s"
+	RequirementNameTemplateBoost        = "Boost %s"
+	RequirementNameTemplateCustom       = "Custom: %s"
 )
 
-// Статусы проверки требований
 const (
-	RequirementStatusPending = "pending" // Ожидает проверки
-	RequirementStatusSuccess = "success" // Успешно выполнено
-	RequirementStatusFailed  = "failed"  // Не выполнено
-	RequirementStatusSkipped = "skipped" // Пропущено (например, из-за RPS)
-	RequirementStatusError   = "error"   // Ошибка при проверке
+	RequirementStatusPending = "pending"
+	RequirementStatusSuccess = "success"
+	RequirementStatusFailed  = "failed"
+	RequirementStatusSkipped = "skipped"
+	RequirementStatusError   = "error"
 )
 
-// Requirement представляет требование для участия в розыгрыше
 type Requirement struct {
-	Type        string `json:"type"`        // Тип требования (subscription, boost, custom)
-	Username    string `json:"username"`    // Username канала (с @ или без)
-	Description string `json:"description"` // Описание для кастомных требований
-	name        string // Внутреннее поле для кэширования сгенерированного имени
+	Type        string `json:"type"`
+	Username    string `json:"username"`
+	Description string `json:"description"`
+	name        string
 }
 
-// Name возвращает сгенерированное имя требования
 func (r *Requirement) Name() string {
 	if r.name != "" {
 		return r.name
@@ -70,7 +65,6 @@ func (r *Requirement) Name() string {
 	return r.name
 }
 
-// MarshalJSON реализует пользовательскую сериализацию в JSON
 func (r *Requirement) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Name        string `json:"name"`
@@ -85,10 +79,9 @@ func (r *Requirement) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// UnmarshalJSON реализует пользовательскую десериализацию из JSON
 func (r *Requirement) UnmarshalJSON(data []byte) error {
 	aux := struct {
-		Name        string `json:"name"` // Игнорируем name при десериализации
+		Name        string `json:"name"`
 		Type        string `json:"type"`
 		Username    string `json:"username"`
 		Description string `json:"description"`
@@ -102,7 +95,6 @@ func (r *Requirement) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Validate проверяет корректность требования
 func (r *Requirement) Validate() error {
 	if r.Type != RequirementTypeSubscription && r.Type != RequirementTypeBoost && r.Type != RequirementTypeCustom {
 		return fmt.Errorf("invalid requirement type: %s", r.Type)
@@ -113,7 +105,6 @@ func (r *Requirement) Validate() error {
 		if r.Username == "" {
 			return fmt.Errorf("username is required for %s requirement", r.Type)
 		}
-		// Для subscription и boost добавляем @ к username, если его нет
 		if !strings.HasPrefix(r.Username, "@") {
 			r.Username = "@" + r.Username
 		}
@@ -121,18 +112,15 @@ func (r *Requirement) Validate() error {
 		if r.Description == "" {
 			return fmt.Errorf("description is required for custom requirement")
 		}
-		// Для custom требований username может быть пустым
 	}
 
 	return nil
 }
 
-// IsCustom проверяет, является ли требование кастомным
 func (r *Requirement) IsCustom() bool {
 	return r.Type == RequirementTypeCustom
 }
 
-// ChatInfo содержит информацию о канале
 type ChatInfo struct {
 	Title     string `json:"title"`
 	Username  string `json:"username"`
@@ -140,28 +128,25 @@ type ChatInfo struct {
 	AvatarURL string `json:"avatar_url"`
 }
 
-// RequirementCheckResult содержит результат проверки требования
 type RequirementCheckResult struct {
-	Name     string    `json:"name"`                // Название требования
-	Type     string    `json:"type"`                // Тип требования
-	Username string    `json:"username"`            // Username канала
-	Status   string    `json:"status"`              // Статус проверки
-	Error    string    `json:"error,omitempty"`     // Ошибка, если есть
-	ChatInfo *ChatInfo `json:"chat_info,omitempty"` // Информация о канале
+	Name     string    `json:"name"`
+	Type     string    `json:"type"`
+	Username string    `json:"username"`
+	Status   string    `json:"status"`
+	Error    string    `json:"error,omitempty"`
+	ChatInfo *ChatInfo `json:"chat_info,omitempty"`
 }
 
-// RequirementsCheckResponse содержит результаты проверки всех требований
 type RequirementsCheckResponse struct {
-	GiveawayID string                   `json:"giveaway_id"` // ID розыгрыша
-	Results    []RequirementCheckResult `json:"results"`     // Результаты проверки
-	AllMet     bool                     `json:"all_met"`     // Все требования выполнены
+	GiveawayID string                   `json:"giveaway_id"`
+	Results    []RequirementCheckResult `json:"results"`
+	AllMet     bool                     `json:"all_met"`
 }
 
-// RequirementTemplate представляет шаблон требования
 type RequirementTemplate struct {
-	ID   string `json:"id"`   // Уникальный идентификатор шаблона
-	Name string `json:"name"` // Название для отображения
-	Type string `json:"type"` // Тип требования
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
 }
 
 func (t *RequirementTemplate) Validate() error {
@@ -177,17 +162,13 @@ func (t *RequirementTemplate) Validate() error {
 	return nil
 }
 
-// ChatIDInfo содержит информацию об идентификаторе чата
 type ChatIDInfo struct {
-	RawID     string // Исходный ID как он был передан
-	Username  string // Юзернейм чата (если есть)
-	IsNumeric bool   // Флаг, указывающий является ли ID числовым
-	NumericID int64  // Числовой ID чата
+	RawID     string
+	Username  string
+	IsNumeric bool
+	NumericID int64
 }
 
-// GetChatIDInfo анализирует формат переданного идентификатора чата
-// Важно: этот метод только парсит формат, но не делает API-запросы
-// Для получения числового ID используйте telegram.Client.GetChatIDByUsername
 func (r *Requirement) GetChatIDInfo() (*ChatIDInfo, error) {
 	info := &ChatIDInfo{
 		RawID: r.Username,
@@ -226,7 +207,6 @@ func (r *Requirements) Validate() error {
 	return nil
 }
 
-// HasCustomRequirements проверяет, есть ли кастомные требования
 func (r *Requirements) HasCustomRequirements() bool {
 	for _, req := range r.Requirements {
 		if req.IsCustom() {
@@ -236,7 +216,6 @@ func (r *Requirements) HasCustomRequirements() bool {
 	return false
 }
 
-// GetNonCustomRequirements возвращает все требования, кроме кастомных
 func (r *Requirements) GetNonCustomRequirements() []Requirement {
 	var nonCustom []Requirement
 	for _, req := range r.Requirements {

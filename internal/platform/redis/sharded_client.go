@@ -287,3 +287,11 @@ func (c *ShardedRedisClient) GetShardStats() map[string]interface{} {
 
 	return stats
 }
+
+func (c *ShardedRedisClient) Ping(ctx context.Context) *redis.StatusCmd {
+	// Используем первый write shard для ping
+	if len(c.writeShards) > 0 {
+		return c.writeShards[0].Ping(ctx)
+	}
+	return redis.NewStatusCmd(ctx, "ping")
+}

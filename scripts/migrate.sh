@@ -1,42 +1,91 @@
 #!/bin/bash
 
-# Check if migrate tool is installed
-if ! command -v migrate &> /dev/null; then
-    echo "migrate tool is not installed. Installing..."
-    go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+# Скрипт для запуска миграций PostgreSQL
+
+set -e
+
+# Цвета для вывода
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Функция для вывода сообщений
+log() {
+    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}"
+}
+
+warn() {
+    echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] WARNING: $1${NC}"
+}
+
+error() {
+    echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $1${NC}"
+}
+
+# Проверка наличия переменных окружения
+if [ -z "$POSTGRES_HOST" ]; then
+    POSTGRES_HOST="localhost"
 fi
 
-# Load environment variables from .env file
-if [ -f .env ]; then
-    export $(cat .env | grep -v '^#' | xargs)
+if [ -z "$POSTGRES_PORT" ]; then
+    POSTGRES_PORT="5432"
 fi
 
-# Default values
-DB_HOST=${DB_HOST:-localhost}
-DB_PORT=${DB_PORT:-5432}
-DB_USER=${DB_USER:-postgres}
-DB_PASSWORD=${DB_PASSWORD:-postgres}
-DB_NAME=${DB_NAME:-giveaway}
-DB_SSL_MODE=${DB_SSL_MODE:-disable}
+if [ -z "$POSTGRES_USER" ]; then
+    POSTGRES_USER="postgres"
+fi
 
-# Build connection string
-DB_URL="postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=${DB_SSL_MODE}"
+if [ -z "$POSTGRES_DB" ]; then
+    POSTGRES_DB="giveaway_tool"
+fi
 
-# Check command line arguments
-ACTION=$1
-if [ -z "$ACTION" ]; then
-    echo "Please specify an action: up or down"
+# Проверка подключения к PostgreSQL
+log "Проверка подключения к PostgreSQL..."
+if ! pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER"; then
+    error "Не удается подключиться к PostgreSQL"
     exit 1
 fi
 
-# Run migrations
-echo "Running migrations ${ACTION}..."
-migrate -database "${DB_URL}" -path internal/platform/database/migrations "$ACTION"
+log "Подключение к PostgreSQL успешно"
 
-# Check migration status
-if [ $? -eq 0 ]; then
-    echo "Migration ${ACTION} completed successfully"
+# Создание базы данных, если она не существует
+log "Проверка существования базы данных $POSTGRES_DB..."
+if ! psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -lqt | cut -d \| -f 1 | grep -qw "$POSTGRES_DB"; then
+    log "Создание базы данных $POSTGRES_DB..."
+    createdb -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" "$POSTGRES_DB"
+    log "База данных $POSTGRES_DB создана"
 else
-    echo "Migration ${ACTION} failed"
-    exit 1
-fi 
+    log "База данных $POSTGRES_DB уже существует"
+fi
+
+# Запуск миграций
+log "Запуск миграций..."
+
+# Находим все файлы миграций
+MIGRATION_FILES=$(find migrations -name "*.sql" | sort)
+
+if [ -z "$MIGRATION_FILES" ]; then
+    warn "Файлы миграций не найдены в директории migrations/"
+    exit 0
+fi
+
+# Выполняем каждую миграцию
+for migration_file in $MIGRATION_FILES; do
+    log "Выполнение миграции: $migration_file"
+    
+    if psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f "$migration_file"; then
+        log "Миграция $migration_file выполнена успешно"
+    else
+        error "Ошибка при выполнении миграции $migration_file"
+        exit 1
+    fi
+done
+
+log "Все миграции выполнены успешно!"
+
+# Проверка структуры базы данных
+log "Проверка структуры базы данных..."
+psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "\dt"
+
+log "Миграция завершена успешно!" 

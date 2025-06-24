@@ -12,6 +12,7 @@ import (
 )
 
 type RedisClient interface {
+	Ping(ctx context.Context) *redis.StatusCmd
 	Set(ctx context.Context, key string, value interface{}, ttl ...time.Duration) *redis.StatusCmd
 	Get(ctx context.Context, key string) *redis.StringCmd
 	Del(ctx context.Context, keys ...string) *redis.IntCmd
@@ -81,6 +82,10 @@ func createShardedRedisClientFromConfig(cfg *config.Config) (*ShardedRedisClient
 
 type redisClientWrapper struct {
 	client *redis.Client
+}
+
+func (w *redisClientWrapper) Ping(ctx context.Context) *redis.StatusCmd {
+	return w.client.Ping(ctx)
 }
 
 func (w *redisClientWrapper) Set(ctx context.Context, key string, value interface{}, ttl ...time.Duration) *redis.StatusCmd {

@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"giveaway-tool-backend/internal/common/config"
 	"giveaway-tool-backend/internal/features/giveaway/models"
 	"giveaway-tool-backend/internal/features/giveaway/repository"
 	"giveaway-tool-backend/internal/platform/telegram"
 	"log"
 	"math/rand"
-	"os"
 	"sync"
 	"time"
 
@@ -20,6 +20,7 @@ type CompletionService struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 	repo           repository.GiveawayRepository
+	config         *config.Config
 	logger         *log.Logger
 	processing     sync.Map
 	semaphore      chan struct{}
@@ -27,14 +28,15 @@ type CompletionService struct {
 	telegramClient *telegram.Client
 }
 
-func NewCompletionService(repo repository.GiveawayRepository, telegramClient *telegram.Client) *CompletionService {
+func NewCompletionService(repo repository.GiveawayRepository, telegramClient *telegram.Client, config *config.Config, logger *log.Logger) *CompletionService {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &CompletionService{
 		ctx:            ctx,
 		cancel:         cancel,
 		repo:           repo,
-		logger:         log.New(os.Stdout, "[CompletionService] ", log.LstdFlags),
-		semaphore:      make(chan struct{}, MaxConcurrentProcessing),
+		config:         config,
+		logger:         logger,
+		semaphore:      make(chan struct{}, 10), // MaxConcurrentProcessing
 		telegramClient: telegramClient,
 	}
 }
@@ -45,7 +47,7 @@ func (s *CompletionService) Start() {
 
 	go func() {
 		defer s.wg.Done()
-		ticker := time.NewTicker(CheckInterval)
+		ticker := time.NewTicker(10 * time.Second) // CheckInterval
 		defer ticker.Stop()
 
 		for {
@@ -62,7 +64,7 @@ func (s *CompletionService) Start() {
 
 	go func() {
 		defer s.wg.Done()
-		ticker := time.NewTicker(CleanupInterval)
+		ticker := time.NewTicker(30 * time.Minute) // CleanupInterval
 		defer ticker.Stop()
 
 		for {
@@ -145,9 +147,9 @@ func (s *CompletionService) processCompletedGiveaways() error {
 
 func (s *CompletionService) processGiveawayWithRetry(giveawayID string) error {
 	var lastErr error
-	for attempt := 1; attempt <= MaxRetries; attempt++ {
+	for attempt := 1; attempt <= 3; attempt++ { // MaxRetries
 		lockKey := fmt.Sprintf("lock:giveaway:%s", giveawayID)
-		if err := s.repo.AcquireLock(s.ctx, lockKey, LockTimeout); err != nil {
+		if err := s.repo.AcquireLock(s.ctx, lockKey, 30*time.Second); err != nil { // LockTimeout
 			if err == repository.ErrAlreadyLocked {
 				return nil
 			}
@@ -162,18 +164,18 @@ func (s *CompletionService) processGiveawayWithRetry(giveawayID string) error {
 				return err
 			}
 			lastErr = err
-			time.Sleep(RetryDelay)
+			time.Sleep(5 * time.Second) // RetryDelay
 			continue
 		}
 
 		return nil
 	}
 
-	return fmt.Errorf("failed after %d attempts, last error: %w", MaxRetries, lastErr)
+	return fmt.Errorf("failed after %d attempts, last error: %w", 3, lastErr)
 }
 
 func (s *CompletionService) processGiveaway(giveawayID string) error {
-	ctx, cancel := context.WithTimeout(s.ctx, ProcessingTimeout)
+	ctx, cancel := context.WithTimeout(s.ctx, 2*time.Minute) // ProcessingTimeout
 	defer cancel()
 
 	tx, err := s.repo.BeginTx(ctx)
@@ -610,9 +612,9 @@ func getPlaceSuffix(place int) string {
 
 func (s *CompletionService) processCustomGiveawayWithRetry(giveawayID string) error {
 	var lastErr error
-	for attempt := 1; attempt <= MaxRetries; attempt++ {
+	for attempt := 1; attempt <= 3; attempt++ { // MaxRetries
 		lockKey := fmt.Sprintf("lock:giveaway:%s", giveawayID)
-		if err := s.repo.AcquireLock(s.ctx, lockKey, LockTimeout); err != nil {
+		if err := s.repo.AcquireLock(s.ctx, lockKey, 30*time.Second); err != nil { // LockTimeout
 			if err == repository.ErrAlreadyLocked {
 				return nil
 			}
@@ -627,18 +629,18 @@ func (s *CompletionService) processCustomGiveawayWithRetry(giveawayID string) er
 				return err
 			}
 			lastErr = err
-			time.Sleep(RetryDelay)
+			time.Sleep(5 * time.Second) // RetryDelay
 			continue
 		}
 
 		return nil
 	}
 
-	return fmt.Errorf("failed after %d attempts, last error: %w", MaxRetries, lastErr)
+	return fmt.Errorf("failed after %d attempts, last error: %w", 3, lastErr)
 }
 
 func (s *CompletionService) processCustomGiveaway(giveawayID string) error {
-	ctx, cancel := context.WithTimeout(s.ctx, ProcessingTimeout)
+	ctx, cancel := context.WithTimeout(s.ctx, 2*time.Minute) // ProcessingTimeout
 	defer cancel()
 
 	tx, err := s.repo.BeginTx(ctx)

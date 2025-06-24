@@ -1,54 +1,142 @@
 package config
 
 import (
-	"github.com/caarlos0/env/v10"
-	"github.com/joho/godotenv"
+	"fmt"
+	"os"
+	"strconv"
+	"time"
 )
 
 type Config struct {
-	Debug bool `env:"DEBUG" envDefault:"false"`
+	Server   ServerConfig
+	Redis    RedisConfig
+	Postgres PostgresConfig
+	Cache    CacheConfig
+	Debug    bool
+}
 
-	Server struct {
-		Port   int    `env:"PORT" envDefault:"8080"`
-		Origin string `env:"ORIGIN" envDefault:"http://localhost:3000"`
-	}
+type ServerConfig struct {
+	Port   int
+	Origin string
+}
 
-	Redis struct {
-		Host     string `env:"REDIS_HOST" envDefault:"localhost"`
-		Port     int    `env:"REDIS_PORT" envDefault:"6379"`
-		Password string `env:"REDIS_PASSWORD" envDefault:""`
-		DB       int    `env:"REDIS_DB" envDefault:"0"`
+type RedisConfig struct {
+	Host     string
+	Port     int
+	Password string
+	DB       int
+	PoolSize int
 
-		// Конфигурация для шардирования
-		EnableSharding bool `env:"REDIS_ENABLE_SHARDING" envDefault:"false"`
+	// Конфигурация для шардирования
+	EnableSharding bool
 
-		// Шарды для записи (через запятую: host:port:password:db)
-		WriteShards []string `env:"REDIS_WRITE_SHARDS" envSeparator:","`
+	// Шарды для записи (через запятую: host:port:password:db)
+	WriteShards []string
 
-		// Шарды для чтения (через запятую: host:port:password:db)
-		ReadShards []string `env:"REDIS_READ_SHARDS" envSeparator:","`
+	// Шарды для чтения (через запятую: host:port:password:db)
+	ReadShards []string
 
-		// Стратегия распределения ключей
-		ShardingStrategy string `env:"REDIS_SHARDING_STRATEGY" envDefault:"hash"` // hash, round_robin, consistent_hash
-	}
+	// Стратегия распределения ключей
+	ShardingStrategy string
+}
 
-	Telegram struct {
-		BotToken string   `env:"BOT_TOKEN,required"`
-		Debug    bool     `env:"TELEGRAM_DEBUG" envDefault:"false"`
-		AdminIDs []string `env:"ADMIN_IDS" envSeparator:","`
-	}
+type PostgresConfig struct {
+	Host            string
+	Port            int
+	User            string
+	Password        string
+	Database        string
+	SSLMode         string
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+}
+
+type CacheConfig struct {
+	// TTL for different types of cached data
+	GiveawayTTL             time.Duration
+	UserTTL                 time.Duration
+	ChannelTTL              time.Duration
+	UserStatsTTL            time.Duration
+	UserGiveawaysTTL        time.Duration
+	TopGiveawaysTTL         time.Duration
+	PrizeTemplatesTTL       time.Duration
+	RequirementTemplatesTTL time.Duration
 }
 
 func Load() *Config {
-	if err := godotenv.Load(); err != nil {
-		// Игнорируем ошибку, если .env файл не найден
-		// В production окружении переменные могут быть установлены напрямую
+	return &Config{
+		Server: ServerConfig{
+			Port:   getEnvAsInt("SERVER_PORT", 8080),
+			Origin: getEnv("SERVER_ORIGIN", "http://localhost:3000"),
+		},
+		Redis: RedisConfig{
+			Host:     getEnv("REDIS_HOST", "localhost"),
+			Port:     getEnvAsInt("REDIS_PORT", 6379),
+			Password: getEnv("REDIS_PASSWORD", ""),
+			DB:       getEnvAsInt("REDIS_DB", 0),
+			PoolSize: getEnvAsInt("REDIS_POOL_SIZE", 10),
+		},
+		Postgres: PostgresConfig{
+			Host:            getEnv("POSTGRES_HOST", "localhost"),
+			Port:            getEnvAsInt("POSTGRES_PORT", 5432),
+			User:            getEnv("POSTGRES_USER", "postgres"),
+			Password:        getEnv("POSTGRES_PASSWORD", ""),
+			Database:        getEnv("POSTGRES_DB", "giveaway_tool"),
+			SSLMode:         getEnv("POSTGRES_SSLMODE", "disable"),
+			MaxOpenConns:    getEnvAsInt("POSTGRES_MAX_OPEN_CONNS", 25),
+			MaxIdleConns:    getEnvAsInt("POSTGRES_MAX_IDLE_CONNS", 5),
+			ConnMaxLifetime: getEnvAsDuration("POSTGRES_CONN_MAX_LIFETIME", 5*time.Minute),
+		},
+		Cache: CacheConfig{
+			GiveawayTTL:             getEnvAsDuration("CACHE_GIVEAWAY_TTL", 5*time.Minute),
+			UserTTL:                 getEnvAsDuration("CACHE_USER_TTL", 5*time.Minute),
+			ChannelTTL:              getEnvAsDuration("CACHE_CHANNEL_TTL", 5*time.Minute),
+			UserStatsTTL:            getEnvAsDuration("CACHE_USER_STATS_TTL", 5*time.Minute),
+			UserGiveawaysTTL:        getEnvAsDuration("CACHE_USER_GIVEAWAYS_TTL", 5*time.Minute),
+			TopGiveawaysTTL:         getEnvAsDuration("CACHE_TOP_GIVEAWAYS_TTL", 5*time.Minute),
+			PrizeTemplatesTTL:       getEnvAsDuration("CACHE_PRIZE_TEMPLATES_TTL", 5*time.Minute),
+			RequirementTemplatesTTL: getEnvAsDuration("CACHE_REQUIREMENT_TEMPLATES_TTL", 5*time.Minute),
+		},
+		Debug: getEnvAsBool("DEBUG", false),
 	}
+}
 
-	cfg := &Config{}
-	if err := env.Parse(cfg); err != nil {
-		panic(err)
+func (c *PostgresConfig) GetDSN() string {
+	return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		c.Host, c.Port, c.User, c.Password, c.Database, c.SSLMode)
+}
+
+func getEnv(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
 	}
+	return defaultValue
+}
 
-	return cfg
+func getEnvAsInt(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if intValue, err := strconv.Atoi(value); err == nil {
+			return intValue
+		}
+	}
+	return defaultValue
+}
+
+func getEnvAsBool(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		if boolValue, err := strconv.ParseBool(value); err == nil {
+			return boolValue
+		}
+	}
+	return defaultValue
+}
+
+func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
+	if value := os.Getenv(key); value != "" {
+		if duration, err := time.ParseDuration(value); err == nil {
+			return duration
+		}
+	}
+	return defaultValue
 }

@@ -27,6 +27,10 @@ func (a *RedisAdapter) GetUnderlyingClient() *redis.Client {
 	return nil
 }
 
+func (a *RedisAdapter) Ping(ctx context.Context) *redis.StatusCmd {
+	return a.client.Ping(ctx)
+}
+
 func (a *RedisAdapter) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) *redis.StatusCmd {
 	return a.client.Set(ctx, key, value, ttl)
 }

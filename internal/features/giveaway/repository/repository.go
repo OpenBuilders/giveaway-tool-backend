@@ -113,3 +113,12 @@ type GiveawayRepository interface {
 	GetHistoryByCreator(ctx context.Context, creatorID int64) ([]*models.Giveaway, error)
 	GetAwaitingActionByCreator(ctx context.Context, creatorID int64) ([]*models.Giveaway, error)
 }
+
+type TicketRepository interface {
+	AddTickets(ctx context.Context, giveawayID string, userID int64, count int) error
+	GetTickets(ctx context.Context, giveawayID string, userID int64) (int, error)
+	GetAllTickets(ctx context.Context, giveawayID string) (map[int64]int, error)
+	GetTotalTickets(ctx context.Context, giveawayID string) (int, error)
+	GetUserTickets(ctx context.Context, userID int64) (map[string]int, error)
+	DeleteTickets(ctx context.Context, giveawayID string, userID int64) error
+}

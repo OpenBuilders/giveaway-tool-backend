@@ -1,43 +1,64 @@
 version: '3.8'
 
 services:
-  frontend:
-    build: ./giveaway-tool-frontend
-    ports:
-      - "3000:3000"
-    networks:
-      - app-network
-
-  backend:
-    build: ./giveaway-tool-backend
-    ports:
-      - "8000:80"
+  postgres:
+    image: postgres:15-alpine
+    container_name: giveaway-postgres
     environment:
-      - BOT_TOKEN=${BOT_TOKEN}
-      - ADMIN_IDS=${ADMIN_IDS}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_PASSWORD=
-      - REDIS_DB=0
-      - DEBUG=true
-    depends_on:
-      - redis
-    networks:
-      - app-network
+      POSTGRES_DB: giveaway_tool
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
+    container_name: giveaway-redis
     ports:
-      - "6380:6379"
+      - "6379:6379"
     volumes:
-      - redis-data:/data
+      - redis_data:/data
     command: redis-server --appendonly yes
-    networks:
-      - app-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: giveaway-app
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=giveaway_tool
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - BOT_TOKEN=${BOT_TOKEN}
+      - DEBUG=true
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    command: go run cmd/app/main.go
 
 volumes:
-  redis-data:
-
-networks:
-  app-network:
-    driver: bridge
+  postgres_data:
+  redis_data:

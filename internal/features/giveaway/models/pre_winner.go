@@ -7,37 +7,32 @@ import (
 	"strings"
 )
 
-// PreWinnerUser представляет пользователя из pre-winner list
 type PreWinnerUser struct {
 	UserID    int64  `json:"user_id"`
 	Username  string `json:"username"`
 	AvatarURL string `json:"avatar_url"`
 }
 
-// PreWinnerListRequest представляет запрос на загрузку pre-winner list
 type PreWinnerListRequest struct {
 	GiveawayID string  `json:"giveaway_id" binding:"required"`
 	UserIDs    []int64 `json:"user_ids" binding:"required"`
 }
 
-// PreWinnerListResponse представляет ответ с обработанным pre-winner list
 type PreWinnerListResponse struct {
 	GiveawayID    string          `json:"giveaway_id"`
-	TotalUploaded int             `json:"total_uploaded"` // Общее количество загруженных ID
-	ValidUsers    []PreWinnerUser `json:"valid_users"`    // Пользователи, прошедшие все проверки
-	InvalidUsers  []int64         `json:"invalid_users"`  // ID пользователей, не прошедших проверки
-	Message       string          `json:"message"`        // Сообщение о результате
+	TotalUploaded int             `json:"total_uploaded"`
+	ValidUsers    []PreWinnerUser `json:"valid_users"`
+	InvalidUsers  []int64         `json:"invalid_users"`
+	Message       string          `json:"message"`
 }
 
-// PreWinnerListStored представляет сохраненный pre-winner list в Redis
 type PreWinnerListStored struct {
 	GiveawayID string          `json:"giveaway_id"`
-	UserIDs    []int64         `json:"user_ids"`   // Только ID пользователей
-	Users      []PreWinnerUser `json:"users"`      // Полная информация о пользователях
-	CreatedAt  int64           `json:"created_at"` // Unix timestamp
+	UserIDs    []int64         `json:"user_ids"`
+	Users      []PreWinnerUser `json:"users"`
+	CreatedAt  int64           `json:"created_at"`
 }
 
-// ParseUserIDsFromFile парсит user_id из текстового файла
 func ParseUserIDsFromFile(content []byte) ([]int64, error) {
 	text := string(content)
 	lines := strings.Split(text, "\n")
@@ -67,7 +62,6 @@ func ParseUserIDsFromFile(content []byte) ([]int64, error) {
 				return nil, fmt.Errorf("invalid user_id format: %s", part)
 			}
 
-			// Избегаем дубликатов
 			if !seenIDs[userID] {
 				seenIDs[userID] = true
 				userIDs = append(userIDs, userID)
@@ -78,7 +72,6 @@ func ParseUserIDsFromFile(content []byte) ([]int64, error) {
 	return userIDs, nil
 }
 
-// ValidatePreWinnerList проверяет корректность pre-winner list
 func ValidatePreWinnerList(giveawayID string, userIDs []int64) error {
 	if giveawayID == "" {
 		return fmt.Errorf("giveaway_id is required")
@@ -88,7 +81,6 @@ func ValidatePreWinnerList(giveawayID string, userIDs []int64) error {
 		return fmt.Errorf("at least one user_id is required")
 	}
 
-	// Проверяем, что все ID положительные
 	for _, userID := range userIDs {
 		if userID <= 0 {
 			return fmt.Errorf("invalid user_id: %d", userID)
@@ -98,15 +90,13 @@ func ValidatePreWinnerList(giveawayID string, userIDs []int64) error {
 	return nil
 }
 
-// PreWinnerValidationResult представляет результат валидации пользователя
 type PreWinnerValidationResult struct {
 	UserID            int64  `json:"user_id"`
-	IsParticipant     bool   `json:"is_participant"`     // Участвует ли в гиве
-	MeetsRequirements bool   `json:"meets_requirements"` // Выполняет ли все требования
-	Error             string `json:"error,omitempty"`    // Ошибка валидации
+	IsParticipant     bool   `json:"is_participant"`
+	MeetsRequirements bool   `json:"meets_requirements"`
+	Error             string `json:"error,omitempty"`
 }
 
-// PreWinnerValidationResponse представляет ответ валидации
 type PreWinnerValidationResponse struct {
 	GiveawayID string                      `json:"giveaway_id"`
 	Results    []PreWinnerValidationResult `json:"results"`
@@ -114,7 +104,6 @@ type PreWinnerValidationResponse struct {
 	TotalCount int                         `json:"total_count"`
 }
 
-// CompleteWithCustomResponse представляет ответ завершения гива с Custom требованиями
 type CompleteWithCustomResponse struct {
 	GiveawayID   string          `json:"giveaway_id"`
 	WinnersCount int             `json:"winners_count"`
@@ -122,19 +111,17 @@ type CompleteWithCustomResponse struct {
 	Message      string          `json:"message"`
 }
 
-// MarshalJSON для PreWinnerUser
 func (p *PreWinnerUser) MarshalJSON() ([]byte, error) {
 	type Alias PreWinnerUser
 	return json.Marshal(&struct {
 		*Alias
-		UserID string `json:"user_id"` // Представляем как строку для совместимости
+		UserID string `json:"user_id"`
 	}{
 		Alias:  (*Alias)(p),
 		UserID: strconv.FormatInt(p.UserID, 10),
 	})
 }
 
-// UnmarshalJSON для PreWinnerUser
 func (p *PreWinnerUser) UnmarshalJSON(data []byte) error {
 	type Alias PreWinnerUser
 	aux := &struct {
@@ -148,7 +135,6 @@ func (p *PreWinnerUser) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	// Парсим user_id из строки
 	userID, err := strconv.ParseInt(aux.UserID, 10, 64)
 	if err != nil {
 		return fmt.Errorf("invalid user_id format: %s", aux.UserID)

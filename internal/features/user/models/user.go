@@ -2,6 +2,13 @@ package models
 
 import "time"
 
+// Константы статусов пользователя
+const (
+	UserStatusActive   = "active"
+	UserStatusInactive = "inactive"
+	UserStatusBanned   = "banned"
+)
+
 // User представляет полную модель пользователя в системе
 // @Description Полная модель пользователя
 type User struct {
