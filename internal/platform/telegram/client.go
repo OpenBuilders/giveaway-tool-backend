@@ -168,20 +168,32 @@ func (c *Client) CheckRequirements(ctx context.Context, userID int64, requiremen
 func (c *Client) NotifyWinner(userID int64, giveaway *models.Giveaway, place int, prize models.PrizeDetail) error {
 	c.logger.Printf("Sending notification to winner %d for giveaway %s (place %d)", userID, giveaway.ID, place)
 
+	// Determine place suffix
+	placeSuffix := "th"
+	switch place {
+	case 1:
+		placeSuffix = "st"
+	case 2:
+		placeSuffix = "nd"
+	case 3:
+		placeSuffix = "rd"
+	}
+
 	message := fmt.Sprintf(
-		"Поздравляем! Вы заняли %d место в розыгрыше \"%s\"!\n\n"+
-			"🎁 Ваш приз: %s\n"+
-			"📝 Описание приза: %s\n\n",
-		place,
-		giveaway.Title,
-		prize.Name,
-		prize.Description,
+		"🎉 Congratulations! You won %d%s place in the giveaway \"%s\"!\n\n"+
+			"🎁 Your prize: %s\n"+
+			"📝 Description: %s\n\n",
+		place, placeSuffix, giveaway.Title, prize.Name, prize.Description,
 	)
 
-	if prize.IsInternal {
-		message += "💫 Приз будет выдан автоматически в ближайшее время."
+	// Add distribution information based on prize type
+	if prize.Type == models.PrizeTypeCustom {
+		message += "📋 This is a custom prize. The giveaway creator will contact you directly to arrange delivery.\n\n" +
+			"⚠️ Note: We are not responsible for the delivery of custom prizes."
+	} else if prize.IsInternal {
+		message += "💫 Your prize will be automatically distributed shortly."
 	} else {
-		message += "👥 Организатор розыгрыша свяжется с вами для передачи приза."
+		message += "👥 The giveaway creator will contact you to arrange prize delivery."
 	}
 
 	c.logger.Printf("Notification message: %s", message)
@@ -200,21 +212,17 @@ func (c *Client) NotifyCreator(userID int64, giveaway *models.Giveaway) error {
 	c.logger.Printf("Sending notification to creator %d for giveaway %s", userID, giveaway.ID)
 
 	message := fmt.Sprintf(
-		"✨ Розыгрыш успешно создан!\\n\\n"+
-			"📋 Название: %s\\n"+
-			"📝 Описание: %s\\n"+
-			"⏰ Длительность: %d секунд\\n"+
-			"👥 Количество победителей: %d\\n\\n"+
-			"🎯 Статус: %s",
-		giveaway.Title,
-		giveaway.Description,
-		giveaway.Duration,
-		giveaway.WinnersCount,
-		giveaway.Status,
+		"✨ Your giveaway \"%s\" has been successfully created!\n\n"+
+			"📋 Title: %s\n"+
+			"📝 Description: %s\n"+
+			"⏰ Duration: %d seconds\n"+
+			"👥 Number of winners: %d\n\n"+
+			"🎯 Status: %s",
+		giveaway.Title, giveaway.Title, giveaway.Description, giveaway.Duration, giveaway.WinnersCount, giveaway.Status,
 	)
 
 	if giveaway.MaxParticipants > 0 {
-		message += fmt.Sprintf("\\n👥 Максимум участников: %d", giveaway.MaxParticipants)
+		message += fmt.Sprintf("\n👥 Maximum participants: %d", giveaway.MaxParticipants)
 	}
 
 	response, err := c.sendMessage(userID, message)
@@ -229,6 +237,59 @@ func (c *Client) NotifyCreator(userID int64, giveaway *models.Giveaway) error {
 
 	c.logger.Printf("Successfully sent notification to creator %d", userID)
 	return nil
+}
+
+// NotifyCreatorAboutCustomPrizes sends a notification to the creator about custom prizes that need manual distribution
+func (c *Client) NotifyCreatorAboutCustomPrizes(userID int64, giveaway *models.Giveaway, customPrizes []models.Winner) error {
+	if len(customPrizes) == 0 {
+		return nil
+	}
+
+	message := fmt.Sprintf(
+		"🎯 Your giveaway \"%s\" has been completed!\n\n"+
+			"📋 You have %d custom prize(s) to distribute manually:\n\n",
+		giveaway.Title, len(customPrizes),
+	)
+
+	for _, winner := range customPrizes {
+		// Get prize information for this place
+		if winner.Place <= 0 || winner.Place > len(giveaway.Prizes) {
+			c.logger.Printf("Invalid place %d for winner %d", winner.Place, winner.UserID)
+			continue
+		}
+
+		prizePlace := giveaway.Prizes[winner.Place-1]
+		message += fmt.Sprintf(
+			"🏆 %d%s place: @%s\n"+
+				"   Prize ID: %s\n"+
+				"   Prize Type: %s\n\n",
+			winner.Place, getPlaceSuffix(winner.Place), winner.Username, prizePlace.PrizeID, prizePlace.PrizeType,
+		)
+	}
+
+	message += "⚠️ Please contact the winners to arrange prize delivery. You are responsible for distributing these custom prizes."
+
+	_, err := c.sendMessage(userID, message)
+	if err != nil {
+		c.logger.Printf("Failed to send custom prizes notification to creator %d: %v", userID, err)
+		return err
+	}
+
+	c.logger.Printf("Successfully sent custom prizes notification to creator %d", userID)
+	return nil
+}
+
+func getPlaceSuffix(place int) string {
+	switch place {
+	case 1:
+		return "st"
+	case 2:
+		return "nd"
+	case 3:
+		return "rd"
+	default:
+		return "th"
+	}
 }
 
 func (c *Client) GetChat(chatID string) (*Chat, error) {

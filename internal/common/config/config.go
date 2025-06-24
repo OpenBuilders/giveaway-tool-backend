@@ -9,7 +9,7 @@ type Config struct {
 	Debug bool `env:"DEBUG" envDefault:"false"`
 
 	Server struct {
-		Port int `env:"PORT" envDefault:"8080"`
+		Port   int    `env:"PORT" envDefault:"8080"`
 		Origin string `env:"ORIGIN" envDefault:"http://localhost:3000"`
 	}
 
@@ -18,6 +18,18 @@ type Config struct {
 		Port     int    `env:"REDIS_PORT" envDefault:"6379"`
 		Password string `env:"REDIS_PASSWORD" envDefault:""`
 		DB       int    `env:"REDIS_DB" envDefault:"0"`
+
+		// Конфигурация для шардирования
+		EnableSharding bool `env:"REDIS_ENABLE_SHARDING" envDefault:"false"`
+
+		// Шарды для записи (через запятую: host:port:password:db)
+		WriteShards []string `env:"REDIS_WRITE_SHARDS" envSeparator:","`
+
+		// Шарды для чтения (через запятую: host:port:password:db)
+		ReadShards []string `env:"REDIS_READ_SHARDS" envSeparator:","`
+
+		// Стратегия распределения ключей
+		ShardingStrategy string `env:"REDIS_SHARDING_STRATEGY" envDefault:"hash"` // hash, round_robin, consistent_hash
 	}
 
 	Telegram struct {
