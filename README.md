@@ -1,199 +1,187 @@
 # Giveaway Tool Backend
 
-Backend для Telegram Mini App гивов с гибридной архитектурой PostgreSQL + Redis.
+A high-performance backend for Telegram Mini App giveaways with hybrid PostgreSQL + Redis architecture.
 
-## Архитектура
+## Architecture
 
-### База данных
-- **PostgreSQL** - основное хранилище данных (гивы, пользователи, каналы, призы, участники)
-- **Redis** - кэширование часто запрашиваемых данных
+### Data Storage
+- **PostgreSQL** - primary data store (giveaways, users, channels, prizes, participants)
+- **Redis** - caching layer for frequently accessed data
 
-### Основные компоненты
+### Core Components
 
-#### Features (Модули)
-- **giveaway** - управление гивами, призами, участниками
-- **user** - управление пользователями
-- **channel** - управление каналами и спонсорами
-- **tonproof** - TON Proof интеграция
+#### Features (Business Logic)
+- **giveaway** - giveaway management, prizes, participants
+- **user** - user management and authentication
+- **channel** - channel and sponsor management
+- **tonproof** - TON Proof integration
 
-#### Platform (Инфраструктура)
-- **postgres** - PostgreSQL клиент и миграции
-- **redis** - Redis клиент для кэширования
-- **telegram** - Telegram Bot API клиент
+#### Platform (Infrastructure)
+- **postgres** - PostgreSQL client and migrations
+- **redis** - Redis client for caching
+- **telegram** - Telegram Bot API client
 
-#### Common (Общие компоненты)
-- **cache** - кэш-сервис для Redis
-- **config** - конфигурация приложения
-- **logger** - логирование
+#### Common (Shared Components)
+- **cache** - Redis cache service
+- **config** - application configuration
+- **errors** - typed error handling
 - **middleware** - HTTP middleware
+- **validation** - input validation
 
-## Установка и запуск
+## Quick Start
 
-### Требования
+### Prerequisites
 - Go 1.21+
 - PostgreSQL 14+
 - Redis 6+
 
-### Настройка окружения
+### Setup
 ```bash
-cp env.example .env
-# Отредактируйте .env файл
-```
+# Clone and setup
+git clone <repository>
+cd giveaway-tool-backend
 
-### Запуск с Docker
-```bash
-# Запуск всех сервисов
+# Configure environment
+cp env.example .env
+# Edit .env with your settings
+
+# Run with Docker
 make docker-run
 
-# Просмотр логов
-make docker-logs
-
-# Остановка
-make docker-stop
-```
-
-### Запуск для разработки
-```bash
-# Запуск только БД
+# Or run locally
 make dev
-
-# Или вручную
-docker-compose up -d postgres redis
-./scripts/migrate.sh
 go run cmd/app/main.go
 ```
 
-### Миграции
+### Development
 ```bash
-# Применение миграций
+# Start dependencies only
+docker-compose up -d postgres redis
+
+# Run migrations
 make migrate
 
-# Создание новой миграции
-./scripts/migrate.sh create migration_name
+# Start application
+go run cmd/app/main.go
 ```
 
-## API Endpoints
+## API Overview
 
-### Пользователи
-- `GET /api/v1/users/me` - информация о текущем пользователе
-- `GET /api/v1/users/me/stats` - статистика пользователя
-- `GET /api/v1/users/me/giveaways` - гивы пользователя
-- `GET /api/v1/users/me/wins` - победы пользователя
+### Authentication
+All endpoints require Telegram Mini App `init_data` for authentication.
 
-### Гивы
-- `POST /api/v1/giveaways` - создание гива
-- `GET /api/v1/giveaways` - список гивов
-- `GET /api/v1/giveaways/:id` - информация о гиве
-- `POST /api/v1/giveaways/:id/join` - участие в гиве
-- `GET /api/v1/giveaways/:id/winners` - победители гива
+### Key Endpoints
+- `POST /api/v1/giveaways` - Create giveaway
+- `GET /api/v1/giveaways/:id` - Get giveaway details
+- `POST /api/v1/giveaways/:id/join` - Join giveaway
+- `GET /api/v1/users/me` - Current user info
+- `GET /api/v1/channels/me` - User's channels
 
-### Каналы
-- `GET /api/v1/channels/:id` - информация о канале
-- `GET /api/v1/channels/username/:username` - информация по username
+## Project Structure
 
-## Кэширование
-
-### Стратегия кэширования
-- **Пользователи**: 30 минут
-- **Статистика пользователей**: 15 минут
-- **Гивы пользователей**: 10 минут
-- **Каналы**: 30 минут
-- **Аватары каналов**: 30 минут
-
-### Инвалидация кэша
-Кэш автоматически инвалидируется при:
-- Обновлении данных пользователя
-- Изменении гива
-- Обновлении информации о канале
-
-## Разработка
-
-### Структура проекта
 ```
 internal/
-├── features/           # Бизнес-логика
-│   ├── giveaway/      # Гивы
-│   ├── user/          # Пользователи
-│   ├── channel/       # Каналы
-│   └── tonproof/      # TON Proof
-├── platform/          # Инфраструктура
-│   ├── postgres/      # PostgreSQL
-│   ├── redis/         # Redis
-│   └── telegram/      # Telegram API
-└── common/            # Общие компоненты
-    ├── cache/         # Кэширование
-    ├── config/        # Конфигурация
-    ├── logger/        # Логирование
-    └── middleware/    # HTTP middleware
+├── features/           # Business logic modules
+│   ├── giveaway/      # Giveaway management
+│   ├── user/          # User management
+│   ├── channel/       # Channel management
+│   └── tonproof/      # TON Proof integration
+├── platform/          # Infrastructure
+│   ├── postgres/      # PostgreSQL client
+│   ├── redis/         # Redis client
+│   └── telegram/      # Telegram API client
+└── common/            # Shared components
+    ├── cache/         # Caching service
+    ├── config/        # Configuration
+    ├── errors/        # Error handling
+    ├── middleware/    # HTTP middleware
+    └── validation/    # Input validation
 ```
 
-### Добавление нового модуля
-1. Создайте структуру в `internal/features/`
-2. Добавьте модели в `models/`
-3. Создайте репозиторий в `repository/postgres/`
-4. Добавьте сервис в `service/`
-5. Создайте HTTP handler в `delivery/http/`
-6. Добавьте кэширование в сервис
+## Development Guide
 
-### Тестирование
+### Adding a New Feature
+1. Create module structure in `internal/features/`
+2. Add models in `models/`
+3. Create repository in `repository/postgres/`
+4. Add service in `service/`
+5. Create HTTP handler in `delivery/http/`
+6. Add caching to service
+
+### Code Style
+- Use structured logging with zap
+- Implement proper error handling with typed errors
+- Add input validation for all endpoints
+- Use transactions for data consistency
+- Implement caching for frequently accessed data
+
+### Testing
 ```bash
-# Запуск тестов
+# Run tests
 make test
 
-# Запуск тестов с покрытием
+# Run with coverage
 go test -cover ./...
 ```
 
-## Мониторинг
+## Caching Strategy
 
-### Health Check
-- `GET /health` - проверка состояния сервисов
+### Cache TTL
+- **Users**: 30 minutes
+- **User stats**: 15 minutes
+- **User giveaways**: 10 minutes
+- **Channels**: 30 minutes
+- **Channel avatars**: 30 minutes
 
-### Логирование
-- Структурированные логи в JSON формате
-- Уровни: debug, info, warn, error, fatal
+### Cache Invalidation
+Cache is automatically invalidated when:
+- User data is updated
+- Giveaway is modified
+- Channel information changes
 
-## Безопасность
+## Error Handling
 
-### Аутентификация
-- Telegram Mini App init_data
-- Валидация подписи Telegram
+The project uses a comprehensive error handling system:
+- Typed errors with context
+- Proper HTTP status codes
+- Structured error responses
+- Error logging with stack traces
 
-### Валидация данных
-- Входные данные валидируются через binding
-- SQL injection защита через prepared statements
-- XSS защита через middleware
+## Security
 
-## Производительность
+- Telegram Mini App authentication
+- Input validation and sanitization
+- SQL injection protection
+- Rate limiting
+- CORS configuration
 
-### Оптимизации
-- Кэширование часто запрашиваемых данных
-- Индексы в PostgreSQL
-- Connection pooling
-- Gzip сжатие ответов
+## Performance
 
-### Мониторинг
-- Метрики PostgreSQL
-- Метрики Redis
-- HTTP метрики
+- Redis caching for hot data
+- PostgreSQL connection pooling
+- Optimized database queries
+- Gzip compression
+- Health checks and monitoring
 
-## Развертывание
+## Deployment
 
 ### Docker
 ```bash
-# Сборка образа
 make docker-build
-
-# Запуск
 make docker-run
 ```
 
-### Kubernetes
-```bash
-# Применение манифестов
-kubectl apply -f deployments/
-```
+### Environment Variables
+See `env.example` for required environment variables.
 
-## Лицензия
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests
+5. Submit a pull request
+
+## License
 
 Apache 2.0
