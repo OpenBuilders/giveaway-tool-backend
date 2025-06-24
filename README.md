@@ -1,7 +1,5 @@
 # Giveaway Tool Backend
 
-A high-performance backend for Telegram Mini App giveaways with hybrid PostgreSQL + Redis architecture.
-
 ## Architecture
 
 ### Data Storage
