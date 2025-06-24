@@ -17,12 +17,14 @@ var (
 type GiveawayStatus string
 
 const (
-	GiveawayStatusActive     GiveawayStatus = "active"  // Active giveaway
-	GiveawayStatusPending    GiveawayStatus = "pending" // Pending processing (selecting winners)
+	GiveawayStatusActive     GiveawayStatus = "active"    // Активный розыгрыш
+	GiveawayStatusCompleted  GiveawayStatus = "completed" // Завершенный розыгрыш
+	GiveawayStatusCancelled  GiveawayStatus = "cancelled" // Отмененный розыгрыш
+	GiveawayStatusPending    GiveawayStatus = "pending"   // Ожидающий начала
+	GiveawayStatusExpired    GiveawayStatus = "expired"   // Истекший (не завершен)
+	GiveawayStatusCustom     GiveawayStatus = "custom"    // Ожидает ручной проверки Custom требований
 	GiveawayStatusProcessing GiveawayStatus = "processing"
-	GiveawayStatusCompleted  GiveawayStatus = "completed" // Completed, winners selected
-	GiveawayStatusHistory    GiveawayStatus = "history"   // In history (all prizes distributed)
-	GiveawayStatusCancelled  GiveawayStatus = "cancelled" // Cancelled
+	GiveawayStatusHistory    GiveawayStatus = "history" // In history (all prizes distributed)
 )
 
 type ChannelInfo struct {

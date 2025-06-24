@@ -614,3 +614,26 @@ func (c *Client) GetPublicChannelInfo(ctx context.Context, username string, repo
 		Title:      chat.Title,
 	}, nil
 }
+
+// NotifyCreatorAboutCustomRequirements sends a notification to the creator about custom requirements
+func (c *Client) NotifyCreatorAboutCustomRequirements(userID int64, giveaway *models.Giveaway) error {
+	message := fmt.Sprintf(
+		"🎯 Your giveaway \"%s\" has ended and has custom requirements!\n\n"+
+			"📋 You have 24 hours to:\n"+
+			"1. Check which participants completed the custom requirements\n"+
+			"2. Upload a .txt file with their user IDs\n"+
+			"3. Confirm the winners\n\n"+
+			"⏰ If you don't upload the file within 24 hours, winners will be selected randomly from participants who completed other requirements.\n\n"+
+			"🔗 Use the Mini App to upload your pre-winner list.",
+		giveaway.Title,
+	)
+
+	_, err := c.sendMessage(userID, message)
+	if err != nil {
+		c.logger.Printf("Failed to send custom requirements notification to creator %d: %v", userID, err)
+		return err
+	}
+
+	c.logger.Printf("Successfully sent custom requirements notification to creator %d", userID)
+	return nil
+}

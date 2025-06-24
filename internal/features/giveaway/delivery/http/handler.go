@@ -57,6 +57,7 @@ func (h *GiveawayHandler) RegisterRoutes(router *gin.RouterGroup) {
 		giveaways.GET("/top", h.getTopGiveaways)
 		giveaways.GET("/me/active", h.getMyActiveGiveaways)
 		giveaways.GET("/me/history", h.getMyGiveawaysHistory)
+		giveaways.GET("/me/awaiting-action", h.getMyAwaitingActionGiveaways)
 		giveaways.GET("/me/participated", h.getParticipatedGiveaways)
 		giveaways.GET("/me/participation/history", h.getParticipationHistory)
 		giveaways.GET("/me/all", h.getAllMyGiveaways)
@@ -64,6 +65,9 @@ func (h *GiveawayHandler) RegisterRoutes(router *gin.RouterGroup) {
 		giveaways.POST("/:id/recreate", h.recreateGiveaway)
 		giveaways.POST("/parse-ids", h.parseIDsFile)
 		giveaways.GET("/:id/check-requirements", h.checkRequirements)
+		giveaways.POST("/pre-winner-list", h.UploadPreWinnerList)
+		giveaways.POST("/validate-pre-winner-list", h.ValidatePreWinnerList)
+		giveaways.POST("/complete-with-custom", h.CompleteWithCustomRequirements)
 	}
 
 	prizes := router.Group("/prizes")
@@ -1255,4 +1259,146 @@ func (h *GiveawayHandler) checkBotInChannelsBulk(c *gin.Context) {
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"results": results})
+}
+
+// UploadPreWinnerList обрабатывает загрузку файла с pre-winner list
+func (h *GiveawayHandler) UploadPreWinnerList(c *gin.Context) {
+	userID := c.GetInt64("user_id")
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "Unauthorized"})
+		return
+	}
+
+	// Получаем giveaway_id из формы
+	giveawayID := c.PostForm("giveaway_id")
+	if giveawayID == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "giveaway_id is required"})
+		return
+	}
+
+	// Получаем файл
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "file is required"})
+		return
+	}
+
+	// Проверяем размер файла (максимум 1MB)
+	if file.Size > 1024*1024 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "file size too large (max 1MB)"})
+		return
+	}
+
+	// Открываем файл
+	src, err := file.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to open file"})
+		return
+	}
+	defer src.Close()
+
+	// Читаем содержимое файла
+	content, err := io.ReadAll(src)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: "failed to read file"})
+		return
+	}
+
+	// Парсим user_id из файла
+	userIDs, err := models.ParseUserIDsFromFile(content)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: fmt.Sprintf("invalid file format: %v", err)})
+		return
+	}
+
+	// Обрабатываем pre-winner list
+	response, err := h.service.ProcessPreWinnerList(c.Request.Context(), userID, giveawayID, userIDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// ValidatePreWinnerList валидирует pre-winner list
+func (h *GiveawayHandler) ValidatePreWinnerList(c *gin.Context) {
+	userID := c.GetInt64("user_id")
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "Unauthorized"})
+		return
+	}
+
+	var request models.PreWinnerListRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	// Валидируем запрос
+	if err := models.ValidatePreWinnerList(request.GiveawayID, request.UserIDs); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	// Валидируем пользователей
+	response, err := h.service.ValidatePreWinnerUsers(c.Request.Context(), userID, request.GiveawayID, request.UserIDs)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// CompleteWithCustomRequirements завершает гив с кастомными требованиями
+func (h *GiveawayHandler) CompleteWithCustomRequirements(c *gin.Context) {
+	userID := c.GetInt64("user_id")
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "Unauthorized"})
+		return
+	}
+
+	// Получаем giveaway_id из JSON
+	var request struct {
+		GiveawayID string `json:"giveaway_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	// Завершаем гив с кастомными требованиями
+	response, err := h.service.CompleteGiveawayWithCustomRequirements(c.Request.Context(), userID, request.GiveawayID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, response)
+}
+
+// @Summary Get my awaiting action giveaways
+// @Description Get giveaways created by the user that are awaiting action (custom status)
+// @Tags giveaways
+// @Accept json
+// @Produce json
+// @Security TelegramInitData
+// @Success 200 {array} models.GiveawayResponse
+// @Failure 401 {object} models.ErrorResponse "Unauthorized"
+// @Router /giveaways/me/awaiting-action [get]
+func (h *GiveawayHandler) getMyAwaitingActionGiveaways(c *gin.Context) {
+	userID := c.GetInt64("user_id")
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, ErrorResponse{Error: "Unauthorized"})
+		return
+	}
+
+	giveaways, err := h.service.GetMyAwaitingActionGiveaways(c.Request.Context(), userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, giveaways)
 }

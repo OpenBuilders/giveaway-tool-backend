@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"giveaway-tool-backend/internal/features/giveaway/models"
 	"giveaway-tool-backend/internal/features/giveaway/repository"
@@ -90,6 +91,7 @@ func (s *CompletionService) processCompletedGiveaways() error {
 		return fmt.Errorf("failed to get active giveaways: %w", err)
 	}
 
+	// Обрабатываем обычные активные гивы
 	for _, giveawayID := range activeGiveaways {
 		if _, exists := s.processing.LoadOrStore(giveawayID, true); exists {
 			continue
@@ -107,6 +109,33 @@ func (s *CompletionService) processCompletedGiveaways() error {
 
 			if err := s.processGiveawayWithRetry(id); err != nil {
 				s.logger.Printf("Failed to process giveaway %s: %v", id, err)
+			}
+		}(giveawayID)
+	}
+
+	// Обрабатываем гивы с Custom требованиями, у которых истекло 24 часа
+	customGiveaways, err := s.repo.GetCustomGiveaways(s.ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get custom giveaways: %w", err)
+	}
+
+	for _, giveawayID := range customGiveaways {
+		if _, exists := s.processing.LoadOrStore(giveawayID, true); exists {
+			continue
+		}
+
+		go func(id string) {
+			defer s.processing.Delete(id)
+
+			select {
+			case s.semaphore <- struct{}{}:
+				defer func() { <-s.semaphore }()
+			case <-s.ctx.Done():
+				return
+			}
+
+			if err := s.processCustomGiveawayWithRetry(id); err != nil {
+				s.logger.Printf("Failed to process custom giveaway %s: %v", id, err)
 			}
 		}(giveawayID)
 	}
@@ -166,6 +195,38 @@ func (s *CompletionService) processGiveaway(giveawayID string) error {
 		return nil
 	}
 
+	// Проверяем, есть ли кастомные требования
+	hasCustomReqs := false
+	if giveaway.Requirements != nil && len(giveaway.Requirements) > 0 {
+		for _, req := range giveaway.Requirements {
+			if req.IsCustom() {
+				hasCustomReqs = true
+				break
+			}
+		}
+	}
+
+	// Если есть кастомные требования, переводим в состояние ожидания ручной проверки
+	if hasCustomReqs {
+		s.logger.Printf("Giveaway %s has custom requirements, switching to custom status", giveawayID)
+
+		// Обновляем статус на custom и устанавливаем время истечения (24 часа)
+		giveaway.Status = models.GiveawayStatusCustom
+		giveaway.UpdatedAt = time.Now()
+		if err := s.repo.UpdateTx(ctx, tx, giveaway); err != nil {
+			return fmt.Errorf("failed to update giveaway status to custom: %w", err)
+		}
+
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("failed to commit transaction: %w", err)
+		}
+
+		// Отправляем уведомление создателю о необходимости загрузить pre-winner list
+		go s.notifyCreatorAboutCustomRequirements(giveaway)
+
+		return nil
+	}
+
 	participants, err := s.repo.GetParticipantsTx(ctx, tx, giveawayID)
 	if err != nil {
 		return fmt.Errorf("failed to get participants: %w", err)
@@ -198,17 +259,14 @@ func (s *CompletionService) processGiveaway(giveawayID string) error {
 		return fmt.Errorf("failed to update giveaway status: %w", err)
 	}
 
-	if err := s.repo.AddToHistoryTx(ctx, tx, giveaway.ID); err != nil {
-		return fmt.Errorf("failed to move giveaway to history: %w", err)
-	}
-
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	// Step 4: Send notifications (asynchronously)
+	// Step 4: Send notifications asynchronously
 	go s.sendNotifications(giveaway, winners)
 
+	s.logger.Printf("Successfully completed giveaway %s with %d winners", giveawayID, len(winners))
 	return nil
 }
 
@@ -243,36 +301,98 @@ func (s *CompletionService) selectWinners(ctx context.Context, tx repository.Tra
 }
 
 func (s *CompletionService) selectWinnersRandom(ctx context.Context, tx repository.Transaction, giveaway *models.Giveaway, participants []int64) ([]models.Winner, error) {
-	winners := make([]models.Winner, 0, giveaway.WinnersCount)
-	selectedUsers := make(map[int64]bool)
+	// Фильтруем участников по не-кастомным требованиям
+	var validParticipants []int64
 
-	for place := 1; place <= giveaway.WinnersCount; place++ {
-		if len(participants) == 0 {
-			break
+	for _, userID := range participants {
+		// Проверяем требования (кроме кастомных)
+		if len(giveaway.Requirements) > 0 {
+			nonCustomReqs := make([]models.Requirement, 0)
+			for _, req := range giveaway.Requirements {
+				if !req.IsCustom() {
+					nonCustomReqs = append(nonCustomReqs, req)
+				}
+			}
+
+			if len(nonCustomReqs) > 0 {
+				// Проверяем выполнение всех не-кастомных требований
+				allMet := true
+				for _, req := range nonCustomReqs {
+					switch req.Type {
+					case models.RequirementTypeSubscription:
+						isMember, err := s.telegramClient.CheckMembership(ctx, userID, req.Username)
+						if err != nil {
+							// Если получили ошибку RPS, пропускаем проверку
+							var rpsErr *telegram.RPSError
+							if ok := errors.As(err, &rpsErr); ok {
+								continue
+							}
+							allMet = false
+							break
+						}
+						if !isMember {
+							allMet = false
+							break
+						}
+
+					case models.RequirementTypeBoost:
+						hasBoost, err := s.telegramClient.CheckBoost(ctx, userID, req.Username)
+						if err != nil {
+							// Если получили ошибку RPS, пропускаем проверку
+							var rpsErr *telegram.RPSError
+							if ok := errors.As(err, &rpsErr); ok {
+								continue
+							}
+							allMet = false
+							break
+						}
+						if !hasBoost {
+							allMet = false
+							break
+						}
+					}
+				}
+				if allMet {
+					validParticipants = append(validParticipants, userID)
+				}
+			} else {
+				// Если нет не-кастомных требований, все участники валидны
+				validParticipants = append(validParticipants, userID)
+			}
+		} else {
+			// Если нет требований вообще, все участники валидны
+			validParticipants = append(validParticipants, userID)
 		}
+	}
 
-		// Select random participant
-		idx := rand.Intn(len(participants))
-		userID := participants[idx]
+	// Если нет валидных участников, возвращаем пустой список
+	if len(validParticipants) == 0 {
+		return []models.Winner{}, nil
+	}
 
-		// Get user info
-		user, err := s.repo.GetUser(ctx, userID)
-		if err != nil {
-			s.logger.Printf("Failed to get user info for %d: %v", userID, err)
-			// Remove this participant and continue
-			participants = append(participants[:idx], participants[idx+1:]...)
-			continue
+	// Перемешиваем список валидных участников
+	shuffled := make([]int64, len(validParticipants))
+	copy(shuffled, validParticipants)
+
+	// Fisher-Yates shuffle
+	for i := len(shuffled) - 1; i > 0; i-- {
+		j := rand.Intn(i + 1)
+		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+	}
+
+	// Выбираем первых winnersCount участников
+	winnersCount := giveaway.WinnersCount
+	if winnersCount > len(shuffled) {
+		winnersCount = len(shuffled)
+	}
+
+	winners := make([]models.Winner, winnersCount)
+	for i := 0; i < winnersCount; i++ {
+		winners[i] = models.Winner{
+			UserID:   shuffled[i],
+			Username: fmt.Sprintf("user_%d", shuffled[i]), // Базовое имя, будет обновлено позже
+			Place:    i + 1,
 		}
-
-		winners = append(winners, models.Winner{
-			UserID:   userID,
-			Username: user.Username,
-			Place:    place,
-		})
-		selectedUsers[userID] = true
-
-		// Remove selected participant
-		participants = append(participants[:idx], participants[idx+1:]...)
 	}
 
 	return winners, nil
@@ -467,6 +587,14 @@ func (s *CompletionService) notifyCreatorAboutCustomPrizes(giveaway *models.Give
 	return s.telegramClient.NotifyCreatorAboutCustomPrizes(giveaway.CreatorID, giveaway, customPrizes)
 }
 
+func (s *CompletionService) notifyCreatorAboutCustomRequirements(giveaway *models.Giveaway) {
+	if err := s.telegramClient.NotifyCreatorAboutCustomRequirements(giveaway.CreatorID, giveaway); err != nil {
+		s.logger.Printf("Failed to send custom requirements notification to creator %d: %v", giveaway.CreatorID, err)
+	} else {
+		s.logger.Printf("Successfully sent custom requirements notification to creator %d", giveaway.CreatorID)
+	}
+}
+
 func getPlaceSuffix(place int) string {
 	switch place {
 	case 1:
@@ -478,4 +606,245 @@ func getPlaceSuffix(place int) string {
 	default:
 		return "th"
 	}
+}
+
+func (s *CompletionService) processCustomGiveawayWithRetry(giveawayID string) error {
+	var lastErr error
+	for attempt := 1; attempt <= MaxRetries; attempt++ {
+		lockKey := fmt.Sprintf("lock:giveaway:%s", giveawayID)
+		if err := s.repo.AcquireLock(s.ctx, lockKey, LockTimeout); err != nil {
+			if err == repository.ErrAlreadyLocked {
+				return nil
+			}
+			lastErr = err
+			continue
+		}
+
+		defer s.repo.ReleaseLock(s.ctx, lockKey)
+
+		if err := s.processCustomGiveaway(giveawayID); err != nil {
+			if err == repository.ErrGiveawayNotFound {
+				return err
+			}
+			lastErr = err
+			time.Sleep(RetryDelay)
+			continue
+		}
+
+		return nil
+	}
+
+	return fmt.Errorf("failed after %d attempts, last error: %w", MaxRetries, lastErr)
+}
+
+func (s *CompletionService) processCustomGiveaway(giveawayID string) error {
+	ctx, cancel := context.WithTimeout(s.ctx, ProcessingTimeout)
+	defer cancel()
+
+	tx, err := s.repo.BeginTx(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	giveaway, err := s.repo.GetByIDWithLock(ctx, tx, giveawayID)
+	if err != nil {
+		return fmt.Errorf("failed to get giveaway: %w", err)
+	}
+
+	// Проверяем, что гив в статусе custom
+	if giveaway.Status != models.GiveawayStatusCustom {
+		return nil
+	}
+
+	// Проверяем, прошло ли 24 часа с момента перехода в статус custom
+	customDeadline := giveaway.UpdatedAt.Add(24 * time.Hour)
+	if time.Now().Before(customDeadline) {
+		return nil // Еще не истекло 24 часа
+	}
+
+	s.logger.Printf("Custom giveaway %s expired, selecting winners randomly", giveawayID)
+
+	// Получаем всех участников
+	participants, err := s.repo.GetParticipantsTx(ctx, tx, giveawayID)
+	if err != nil {
+		return fmt.Errorf("failed to get participants: %w", err)
+	}
+
+	if len(participants) == 0 {
+		return s.handleNoParticipants(ctx, tx, giveaway)
+	}
+
+	// Adjust winners count if there are fewer participants
+	if len(participants) < giveaway.WinnersCount {
+		giveaway.WinnersCount = len(participants)
+	}
+
+	// Выбираем победителей случайным образом (только из тех, кто выполнил не-кастомные требования)
+	winners, err := s.selectWinnersRandom(ctx, tx, giveaway, participants)
+	if err != nil {
+		return fmt.Errorf("failed to select winners: %w", err)
+	}
+
+	// Создаем записи о победах и распределяем призы
+	if err := s.createWinRecordsAndDistributePrizes(ctx, tx, giveaway, winners); err != nil {
+		return fmt.Errorf("failed to create win records and distribute prizes: %w", err)
+	}
+
+	// Обновляем статус гива
+	giveaway.Status = models.GiveawayStatusCompleted
+	giveaway.UpdatedAt = time.Now()
+	if err := s.repo.UpdateTx(ctx, tx, giveaway); err != nil {
+		return fmt.Errorf("failed to update giveaway status: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	// Отправляем уведомления
+	go s.sendNotifications(giveaway, winners)
+
+	s.logger.Printf("Successfully completed expired custom giveaway %s with %d winners", giveawayID, len(winners))
+	return nil
+}
+
+// selectRandomWinners выбирает случайных победителей из списка участников
+func (s *CompletionService) selectRandomWinners(participants []int64, winnersCount int) []int64 {
+	if len(participants) <= winnersCount {
+		return participants
+	}
+
+	// Перемешиваем участников
+	shuffled := make([]int64, len(participants))
+	copy(shuffled, participants)
+
+	// Fisher-Yates shuffle
+	for i := len(shuffled) - 1; i > 0; i-- {
+		j := rand.Intn(i + 1)
+		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+	}
+
+	return shuffled[:winnersCount]
+}
+
+// handleCustomGiveawayExpiration обрабатывает истечение 24 часов для гива с кастомными требованиями
+func (s *CompletionService) handleCustomGiveawayExpiration(giveaway *models.Giveaway) {
+	ctx := context.Background()
+
+	// Получаем всех участников гива
+	participants, err := s.repo.GetParticipants(ctx, giveaway.ID)
+	if err != nil {
+		s.logger.Printf("Failed to get participants for custom giveaway expiration: %v", err)
+		return
+	}
+
+	// Собираем участников, выполнивших не-кастомные требования
+	var validUsers []int64
+	for _, participantID := range participants {
+		// Проверяем не-кастомные требования
+		if len(giveaway.Requirements) > 0 {
+			nonCustomReqs := make([]models.Requirement, 0)
+			for _, req := range giveaway.Requirements {
+				if !req.IsCustom() {
+					nonCustomReqs = append(nonCustomReqs, req)
+				}
+			}
+
+			if len(nonCustomReqs) > 0 {
+				// Проверяем выполнение всех не-кастомных требований
+				allMet := true
+				for _, req := range nonCustomReqs {
+					switch req.Type {
+					case models.RequirementTypeSubscription:
+						isMember, err := s.telegramClient.CheckMembership(ctx, participantID, req.Username)
+						if err != nil {
+							allMet = false
+							break
+						}
+						if !isMember {
+							allMet = false
+							break
+						}
+
+					case models.RequirementTypeBoost:
+						hasBoost, err := s.telegramClient.CheckBoost(ctx, participantID, req.Username)
+						if err != nil {
+							allMet = false
+							break
+						}
+						if !hasBoost {
+							allMet = false
+							break
+						}
+					}
+				}
+				if !allMet {
+					continue // Пропускаем участника, не выполнившего требования
+				}
+			}
+		}
+
+		validUsers = append(validUsers, participantID)
+	}
+
+	// Выбираем победителей случайным образом из всех валидных участников
+	if len(validUsers) == 0 {
+		s.logger.Printf("No valid participants found for custom giveaway expiration")
+
+		// Обновляем статус гива на completed
+		giveaway.Status = models.GiveawayStatusCompleted
+		giveaway.UpdatedAt = time.Now()
+		if err := s.repo.Update(ctx, giveaway); err != nil {
+			s.logger.Printf("Failed to update giveaway status to completed: %v", err)
+		}
+		return
+	}
+
+	// Выбираем победителей
+	winners := s.selectRandomWinners(validUsers, giveaway.WinnersCount)
+
+	// Создаем записи о победах
+	for i, winnerID := range winners {
+		winRecord := &models.WinRecord{
+			ID:         uuid.New().String(),
+			GiveawayID: giveaway.ID,
+			UserID:     winnerID,
+			Place:      i + 1,
+			Status:     models.PrizeStatusPending,
+			CreatedAt:  time.Now(),
+			UpdatedAt:  time.Now(),
+		}
+
+		if err := s.repo.CreateWinRecord(ctx, winRecord); err != nil {
+			s.logger.Printf("Failed to create win record: %v", err)
+			continue
+		}
+
+		// Отправляем уведомление победителю
+		if i < len(giveaway.Prizes) {
+			prizePlace := giveaway.Prizes[i]
+			// Создаем PrizeDetail из PrizePlace
+			prizeDetail := models.PrizeDetail{
+				Type:        prizePlace.PrizeType,
+				Name:        fmt.Sprintf("Prize for %d place", i+1),
+				Description: fmt.Sprintf("Prize for %d place", i+1),
+				IsInternal:  models.IsPrizeInternal(prizePlace.PrizeType),
+				Status:      string(models.PrizeStatusPending),
+			}
+			if err := s.telegramClient.NotifyWinner(winnerID, giveaway, i+1, prizeDetail); err != nil {
+				s.logger.Printf("Failed to notify winner: %v", err)
+			}
+		}
+	}
+
+	// Обновляем статус гива
+	giveaway.Status = models.GiveawayStatusCompleted
+	giveaway.UpdatedAt = time.Now()
+	if err := s.repo.Update(ctx, giveaway); err != nil {
+		s.logger.Printf("Failed to update giveaway status to completed: %v", err)
+		return
+	}
+
+	s.logger.Printf("Custom giveaway automatically completed after 24 hours")
 }

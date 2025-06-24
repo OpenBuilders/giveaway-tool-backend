@@ -96,7 +96,20 @@ type GiveawayRepository interface {
 
 	CancelGiveaway(ctx context.Context, giveawayID string) error
 
+	GetCustomGiveaways(ctx context.Context) ([]string, error)
+
 	SetChannelAvatar(ctx context.Context, channelID string, avatarURL string) error
 	GetChannelAvatar(ctx context.Context, channelID string) (string, error)
 	GetChannelUsername(ctx context.Context, channelID int64) (string, error)
+
+	// Pre-winner list methods
+	SavePreWinnerList(ctx context.Context, giveawayID string, preWinnerList *models.PreWinnerListStored) error
+	GetPreWinnerList(ctx context.Context, giveawayID string) (*models.PreWinnerListStored, error)
+	DeletePreWinnerList(ctx context.Context, giveawayID string) error
+
+	// Get giveaways by creator
+	GetByCreator(ctx context.Context, creatorID int64) ([]*models.Giveaway, error)
+	GetActiveByCreator(ctx context.Context, creatorID int64) ([]*models.Giveaway, error)
+	GetHistoryByCreator(ctx context.Context, creatorID int64) ([]*models.Giveaway, error)
+	GetAwaitingActionByCreator(ctx context.Context, creatorID int64) ([]*models.Giveaway, error)
 }

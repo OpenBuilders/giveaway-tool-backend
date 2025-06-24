@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"log"
@@ -1096,6 +1097,16 @@ func (r *redisRepository) GetRequirementTemplates(ctx context.Context) ([]*model
 				Name: "Channel Subscription",
 				Type: "subscription",
 			},
+			{
+				ID:   "channel_boost_en",
+				Name: "Channel Boost",
+				Type: "boost",
+			},
+			{
+				ID:   "custom_requirement_en",
+				Name: "Custom Requirement",
+				Type: "custom",
+			},
 		}
 
 		// Сохраняем шаблоны в Redis
@@ -1245,4 +1256,125 @@ func (r *redisRepository) GetChannelAvatar(ctx context.Context, channelID string
 func (r *redisRepository) GetChannelUsername(ctx context.Context, channelID int64) (string, error) {
 	key := fmt.Sprintf("channel:%d:username", channelID)
 	return r.client.Get(ctx, key).Result()
+}
+
+func (r *redisRepository) GetCustomGiveaways(ctx context.Context) ([]string, error) {
+	// Получаем все гивы в статусе custom
+	pattern := "giveaway:*"
+	keys, err := r.client.Keys(ctx, pattern).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get giveaway keys: %w", err)
+	}
+
+	var customGiveaways []string
+	now := time.Now()
+
+	for _, key := range keys {
+		giveawayID := strings.TrimPrefix(key, "giveaway:")
+
+		// Получаем данные гива
+		data, err := r.client.HGetAll(ctx, key).Result()
+		if err != nil {
+			continue
+		}
+
+		// Проверяем статус
+		status, exists := data["status"]
+		if !exists || status != string(models.GiveawayStatusCustom) {
+			continue
+		}
+
+		// Проверяем, прошло ли 24 часа с момента обновления
+		updatedAtStr, exists := data["updated_at"]
+		if !exists {
+			continue
+		}
+
+		updatedAt, err := time.Parse(time.RFC3339, updatedAtStr)
+		if err != nil {
+			continue
+		}
+
+		// Если прошло 24 часа, добавляем в список
+		if now.After(updatedAt.Add(24 * time.Hour)) {
+			customGiveaways = append(customGiveaways, giveawayID)
+		}
+	}
+
+	return customGiveaways, nil
+}
+
+// SavePreWinnerList сохраняет pre-winner list в Redis
+func (r *redisRepository) SavePreWinnerList(ctx context.Context, giveawayID string, preWinnerList *models.PreWinnerListStored) error {
+	key := fmt.Sprintf("pre_winner_list:%s", giveawayID)
+
+	data, err := json.Marshal(preWinnerList)
+	if err != nil {
+		return fmt.Errorf("failed to marshal pre-winner list: %w", err)
+	}
+
+	// Сохраняем с TTL 24 часа (86400 секунд)
+	return r.client.Set(ctx, key, data, 24*time.Hour).Err()
+}
+
+// GetPreWinnerList получает pre-winner list из Redis
+func (r *redisRepository) GetPreWinnerList(ctx context.Context, giveawayID string) (*models.PreWinnerListStored, error) {
+	key := fmt.Sprintf("pre_winner_list:%s", giveawayID)
+
+	data, err := r.client.Get(ctx, key).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, repository.ErrGiveawayNotFound
+		}
+		return nil, fmt.Errorf("failed to get pre-winner list: %w", err)
+	}
+
+	var preWinnerList models.PreWinnerListStored
+	if err := json.Unmarshal([]byte(data), &preWinnerList); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal pre-winner list: %w", err)
+	}
+
+	return &preWinnerList, nil
+}
+
+// DeletePreWinnerList удаляет pre-winner list из Redis
+func (r *redisRepository) DeletePreWinnerList(ctx context.Context, giveawayID string) error {
+	key := fmt.Sprintf("pre_winner_list:%s", giveawayID)
+	return r.client.Del(ctx, key).Err()
+}
+
+// GetByCreator получает все гивы создателя
+func (r *redisRepository) GetByCreator(ctx context.Context, creatorID int64) ([]*models.Giveaway, error) {
+	return r.GetByCreatorAndStatus(ctx, creatorID, []models.GiveawayStatus{
+		models.GiveawayStatusActive,
+		models.GiveawayStatusPending,
+		models.GiveawayStatusProcessing,
+		models.GiveawayStatusCustom,
+		models.GiveawayStatusCompleted,
+		models.GiveawayStatusHistory,
+		models.GiveawayStatusCancelled,
+	})
+}
+
+// GetActiveByCreator получает активные гивы создателя
+func (r *redisRepository) GetActiveByCreator(ctx context.Context, creatorID int64) ([]*models.Giveaway, error) {
+	return r.GetByCreatorAndStatus(ctx, creatorID, []models.GiveawayStatus{
+		models.GiveawayStatusActive,
+		models.GiveawayStatusPending,
+		models.GiveawayStatusProcessing,
+	})
+}
+
+// GetHistoryByCreator получает исторические гивы создателя
+func (r *redisRepository) GetHistoryByCreator(ctx context.Context, creatorID int64) ([]*models.Giveaway, error) {
+	return r.GetByCreatorAndStatus(ctx, creatorID, []models.GiveawayStatus{
+		models.GiveawayStatusCompleted,
+		models.GiveawayStatusHistory,
+		models.GiveawayStatusCancelled,
+	})
+}
+
+// GetAwaitingActionByCreator получает гивы создателя, ожидающие действия (custom статус)
+func (r *redisRepository) GetAwaitingActionByCreator(ctx context.Context, creatorID int64) ([]*models.Giveaway, error) {
+	return r.GetByCreatorAndStatus(ctx, creatorID, []models.GiveawayStatus{models.GiveawayStatusCustom})
 }

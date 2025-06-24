@@ -11,12 +11,14 @@ import (
 const (
 	RequirementTypeSubscription = "subscription" // Подписка на канал
 	RequirementTypeBoost        = "boost"        // Буст канала
+	RequirementTypeCustom       = "custom"       // Кастомное требование (ручная проверка)
 )
 
 // Шаблоны названий требований
 const (
-	RequirementNameTemplateSubscription = "Follow %s" // Шаблон для подписки
-	RequirementNameTemplateBoost        = "Boost %s"  // Шаблон для буста
+	RequirementNameTemplateSubscription = "Follow %s"  // Шаблон для подписки
+	RequirementNameTemplateBoost        = "Boost %s"   // Шаблон для буста
+	RequirementNameTemplateCustom       = "Custom: %s" // Шаблон для кастомного требования
 )
 
 // Статусы проверки требований
@@ -30,9 +32,10 @@ const (
 
 // Requirement представляет требование для участия в розыгрыше
 type Requirement struct {
-	Type     string `json:"type"`     // Тип требования (subscription, boost)
-	Username string `json:"username"` // Username канала (с @ или без)
-	name     string // Внутреннее поле для кэширования сгенерированного имени
+	Type        string `json:"type"`        // Тип требования (subscription, boost, custom)
+	Username    string `json:"username"`    // Username канала (с @ или без)
+	Description string `json:"description"` // Описание для кастомных требований
+	name        string // Внутреннее поле для кэширования сгенерированного имени
 }
 
 // Name возвращает сгенерированное имя требования
@@ -41,18 +44,27 @@ func (r *Requirement) Name() string {
 		return r.name
 	}
 
-	username := r.Username
-	if !strings.HasPrefix(username, "@") {
-		username = "@" + username
-	}
-
 	switch r.Type {
 	case RequirementTypeSubscription:
+		username := r.Username
+		if !strings.HasPrefix(username, "@") {
+			username = "@" + username
+		}
 		r.name = fmt.Sprintf(RequirementNameTemplateSubscription, username)
 	case RequirementTypeBoost:
+		username := r.Username
+		if !strings.HasPrefix(username, "@") {
+			username = "@" + username
+		}
 		r.name = fmt.Sprintf(RequirementNameTemplateBoost, username)
+	case RequirementTypeCustom:
+		description := r.Description
+		if description == "" {
+			description = "Custom requirement"
+		}
+		r.name = fmt.Sprintf(RequirementNameTemplateCustom, description)
 	default:
-		r.name = fmt.Sprintf("Unknown requirement for %s", username)
+		r.name = fmt.Sprintf("Unknown requirement: %s", r.Username)
 	}
 
 	return r.name
@@ -61,44 +73,63 @@ func (r *Requirement) Name() string {
 // MarshalJSON реализует пользовательскую сериализацию в JSON
 func (r *Requirement) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Name     string `json:"name"`
-		Type     string `json:"type"`
-		Username string `json:"username"`
+		Name        string `json:"name"`
+		Type        string `json:"type"`
+		Username    string `json:"username"`
+		Description string `json:"description,omitempty"`
 	}{
-		Name:     r.Name(),
-		Type:     r.Type,
-		Username: r.Username,
+		Name:        r.Name(),
+		Type:        r.Type,
+		Username:    r.Username,
+		Description: r.Description,
 	})
 }
 
 // UnmarshalJSON реализует пользовательскую десериализацию из JSON
 func (r *Requirement) UnmarshalJSON(data []byte) error {
 	aux := struct {
-		Name     string `json:"name"` // Игнорируем name при десериализации
-		Type     string `json:"type"`
-		Username string `json:"username"`
+		Name        string `json:"name"` // Игнорируем name при десериализации
+		Type        string `json:"type"`
+		Username    string `json:"username"`
+		Description string `json:"description"`
 	}{}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
 	r.Type = aux.Type
 	r.Username = aux.Username
+	r.Description = aux.Description
 	return nil
 }
 
 // Validate проверяет корректность требования
 func (r *Requirement) Validate() error {
-	if r.Type != RequirementTypeSubscription && r.Type != RequirementTypeBoost {
+	if r.Type != RequirementTypeSubscription && r.Type != RequirementTypeBoost && r.Type != RequirementTypeCustom {
 		return fmt.Errorf("invalid requirement type: %s", r.Type)
 	}
-	if r.Username == "" {
-		return fmt.Errorf("username is required")
+
+	switch r.Type {
+	case RequirementTypeSubscription, RequirementTypeBoost:
+		if r.Username == "" {
+			return fmt.Errorf("username is required for %s requirement", r.Type)
+		}
+		// Для subscription и boost добавляем @ к username, если его нет
+		if !strings.HasPrefix(r.Username, "@") {
+			r.Username = "@" + r.Username
+		}
+	case RequirementTypeCustom:
+		if r.Description == "" {
+			return fmt.Errorf("description is required for custom requirement")
+		}
+		// Для custom требований username может быть пустым
 	}
-	// Добавляем @ к username, если его нет
-	if !strings.HasPrefix(r.Username, "@") {
-		r.Username = "@" + r.Username
-	}
+
 	return nil
+}
+
+// IsCustom проверяет, является ли требование кастомным
+func (r *Requirement) IsCustom() bool {
+	return r.Type == RequirementTypeCustom
 }
 
 // ChatInfo содержит информацию о канале
@@ -140,7 +171,7 @@ func (t *RequirementTemplate) Validate() error {
 	if t.Name == "" {
 		return fmt.Errorf("requirement template name is required")
 	}
-	if t.Type != RequirementTypeSubscription && t.Type != RequirementTypeBoost {
+	if t.Type != RequirementTypeSubscription && t.Type != RequirementTypeBoost && t.Type != RequirementTypeCustom {
 		return fmt.Errorf("invalid requirement type: %s", t.Type)
 	}
 	return nil
@@ -193,6 +224,27 @@ func (r *Requirements) Validate() error {
 		}
 	}
 	return nil
+}
+
+// HasCustomRequirements проверяет, есть ли кастомные требования
+func (r *Requirements) HasCustomRequirements() bool {
+	for _, req := range r.Requirements {
+		if req.IsCustom() {
+			return true
+		}
+	}
+	return false
+}
+
+// GetNonCustomRequirements возвращает все требования, кроме кастомных
+func (r *Requirements) GetNonCustomRequirements() []Requirement {
+	var nonCustom []Requirement
+	for _, req := range r.Requirements {
+		if !req.IsCustom() {
+			nonCustom = append(nonCustom, req)
+		}
+	}
+	return nonCustom
 }
 
 func ValidateRequirements(reqs []Requirement) error {
