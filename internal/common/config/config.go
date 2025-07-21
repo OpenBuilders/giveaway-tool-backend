@@ -19,16 +19,16 @@ type Config struct {
 		Password string `env:"REDIS_PASSWORD" envDefault:""`
 		DB       int    `env:"REDIS_DB" envDefault:"0"`
 
-		// Конфигурация для шардирования
+		// Configuration for sharding
 		EnableSharding bool `env:"REDIS_ENABLE_SHARDING" envDefault:"false"`
 
-		// Шарды для записи (через запятую: host:port:password:db)
+		// Shards for writing (comma-separated: host:port:password:db)
 		WriteShards []string `env:"REDIS_WRITE_SHARDS" envSeparator:","`
 
-		// Шарды для чтения (через запятую: host:port:password:db)
+		// Shards for reading (comma-separated: host:port:password:db)
 		ReadShards []string `env:"REDIS_READ_SHARDS" envSeparator:","`
 
-		// Стратегия распределения ключей
+		// Key distribution strategy
 		ShardingStrategy string `env:"REDIS_SHARDING_STRATEGY" envDefault:"hash"` // hash, round_robin, consistent_hash
 	}
 

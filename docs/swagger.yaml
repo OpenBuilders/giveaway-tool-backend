@@ -31,38 +31,31 @@ definitions:
         type: string
     type: object
   models.GiveawayCreate:
-    description: Модель для создания нового розыгрыша
+    description: Model for creating a new giveaway
     properties:
       allow_tickets:
-        description: '@Description Разрешены ли билеты'
+        description: '@Description Are tickets allowed'
         type: boolean
       auto_distribute:
-        description: '@Description Автоматическая выдача призов'
+        description: '@Description Automatic prize distribution'
         type: boolean
       description:
-        description: |-
-          @Description Описание розыгрыша
-          @Required
-          @Min(10)
-          @Max(1000)
+        description: '@Description Giveaway description'
         maxLength: 1000
         minLength: 10
         type: string
       duration:
-        description: |-
-          @Description Длительность розыгрыша в секундах (минимум 5 секунд в режиме отладки, 5 минут в релизном режиме)
-          @Required
-          @Min(5)
+        description: '@Description Giveaway duration in seconds (minimum 5 seconds in debug mode, 5 minutes in release mode)'
         type: integer
       max_participants:
         description: |-
-          @Description Максимальное количество участников (0 = без ограничений)
+          @Description Maximum number of participants (0 = no restrictions)
           @Min(0)
         minimum: 0
         type: integer
       prizes:
         description: |-
-          @Description Список призов по местам
+          @Description List of prizes by places
           @Required
         items:
           $ref: '#/definitions/models.PrizePlace'
@@ -70,10 +63,10 @@ definitions:
       requirements:
         allOf:
         - $ref: '#/definitions/models.Requirements'
-        description: '@Description Требования для участия'
+        description: '@Description Requirements for participation'
       title:
         description: |-
-          @Description Название розыгрыша
+          @Description Giveaway title
           @Required
           @Min(3)
           @Max(100)
@@ -82,7 +75,7 @@ definitions:
         type: string
       winners_count:
         description: |-
-          @Description Количество победителей
+          @Description Number of winners
           @Required
           @Min(1)
         minimum: 1
@@ -105,7 +98,7 @@ definitions:
       description:
         type: string
       duration:
-        description: в секундах
+        description: in seconds
         type: integer
       ended_at:
         type: string
@@ -126,7 +119,7 @@ definitions:
       title:
         type: string
       total_tickets:
-        description: общее количество билетов
+        description: total number of tickets
         type: integer
       updated_at:
         type: string
@@ -134,7 +127,7 @@ definitions:
         description: creator, participant, winner
         type: string
       user_tickets:
-        description: количество билетов пользователя
+        description: number of tickets for the user
         type: integer
       winners:
         items:
@@ -146,7 +139,7 @@ definitions:
   models.GiveawayResponse:
     properties:
       allow_tickets:
-        description: Разрешены ли билеты
+        description: Are tickets allowed
         type: boolean
       auto_distribute:
         type: boolean
@@ -182,7 +175,7 @@ definitions:
         description: owner, participant, user
         type: string
       winners:
-        description: Только для завершенных розыгрышей
+        description: Only for completed giveaways
         items:
           $ref: '#/definitions/models.Winner'
         type: array
@@ -198,11 +191,11 @@ definitions:
     - cancelled
     type: string
     x-enum-comments:
-      GiveawayStatusActive: Активный розыгрыш
-      GiveawayStatusCancelled: Отменен
-      GiveawayStatusCompleted: Завершен, победители выбраны
-      GiveawayStatusHistory: В истории (все призы выданы)
-      GiveawayStatusPending: Ожидает обработки (выбор победителей)
+      GiveawayStatusActive: Active giveaway
+      GiveawayStatusCancelled: Cancelled
+      GiveawayStatusCompleted: Completed, winners selected
+      GiveawayStatusHistory: In history (all prizes distributed)
+      GiveawayStatusPending: Awaiting processing (winner selection)
     x-enum-varnames:
     - GiveawayStatusActive
     - GiveawayStatusPending
@@ -231,7 +224,7 @@ definitions:
       id:
         type: string
       is_internal:
-        description: true для призов, которые выдаются автоматически
+        description: true for prizes that are distributed automatically
         type: boolean
       name:
         type: string
@@ -255,12 +248,12 @@ definitions:
   models.PrizePlace:
     properties:
       place:
-        description: 1 = первое место, 2 = второе место и т.д.
+        description: 1 = first place, 2 = second place and so on
         type: integer
       prize_id:
         type: string
       prize_type:
-        description: Дублируем тип для удобства получения из Redis
+        description: Duplicates type for convenience when getting from Redis
         type: string
     type: object
   models.PrizeTemplate:
@@ -291,19 +284,19 @@ definitions:
   models.Requirement:
     properties:
       chat_id:
-        description: ID канала/чата (например, @channel_name или -100123456789)
+        description: ID of the channel/chat (e.g., @channel_name or -100123456789)
         type: string
       chat_name:
-        description: Название чата/канала для отображения
+        description: Name of the channel/chat for display
         type: string
       chat_type:
         allOf:
         - $ref: '#/definitions/models.ChatType'
-        description: Тип чата
+        description: Chat type
       type:
         allOf:
         - $ref: '#/definitions/models.RequirementType'
-        description: Тип требования
+        description: Requirement type
     type: object
   models.RequirementType:
     enum:
@@ -311,21 +304,21 @@ definitions:
     - booster
     type: string
     x-enum-comments:
-      RequirementTypeBooster: Быть бустером канала/чата
-      RequirementTypeSubscription: Подписка на канал/чат
+      RequirementTypeBooster: Be a booster of the channel/chat
+      RequirementTypeSubscription: Subscribe to the channel/chat
     x-enum-varnames:
     - RequirementTypeSubscription
     - RequirementTypeBooster
   models.Requirements:
     properties:
       enabled:
-        description: Включены ли требования
+        description: Are requirements enabled
         type: boolean
       join_type:
-        description: '"all" - все требования, "any" - любое из требований'
+        description: '"all" - all requirements, "any" - any of the requirements'
         type: string
       requirements:
-        description: Список требований
+        description: List of requirements
         items:
           $ref: '#/definitions/models.Requirement'
         type: array
@@ -351,7 +344,7 @@ definitions:
     - user_id
     type: object
   models.UserResponse:
-    description: Публичная информация о пользователе
+    description: Public user information
     properties:
       created_at:
         example: "2024-03-15T14:30:00Z"
