@@ -45,7 +45,7 @@ func (s *channelService) GetChannelAvatar(ctx context.Context, channelID int64) 
 		log.Printf("[DEBUG] Getting channel avatar for channel %d", channelID)
 	}
 
-	key := fmt.Sprintf(channelredis.ChannelAvatarKey, channelID)
+	key := fmt.Sprintf(channelredis.ChannelAvatarKey, strconv.FormatInt(channelID, 10))
 	avatarURL, err := s.redisClient.Get(ctx, key).Result()
 	if err != nil {
 		if err == redis.Nil {
