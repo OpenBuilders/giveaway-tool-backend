@@ -11,7 +11,7 @@ redis:
 telegram:
   bot_token: "your-bot-token"
   debug: false
-  admin_ids: [123456789] # Список Telegram ID администраторов
+  admin_ids: [123456789] # List of Telegram admin IDs
 
 jwt:
   secret: your-secret-key
