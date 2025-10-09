@@ -5,6 +5,7 @@ type RequirementType string
 
 const (
 	RequirementTypeSubscription RequirementType = "subscription"
+	RequirementTypeBoost        RequirementType = "boost"
 )
 
 // Requirement describes a single requirement entry for a giveaway.

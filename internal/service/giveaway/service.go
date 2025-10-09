@@ -180,7 +180,8 @@ func (s *Service) Join(ctx context.Context, id string, userID int64) error {
 	// Requirements check (TG errors treated as satisfied)
 	if s.tg != nil && len(g.Requirements) > 0 {
 		for _, req := range g.Requirements {
-			if req.Type == dg.RequirementTypeSubscription {
+			switch req.Type {
+			case dg.RequirementTypeSubscription:
 				chat := ""
 				if req.ChannelID != 0 {
 					chat = fmt.Sprintf("%d", req.ChannelID)
@@ -192,7 +193,23 @@ func (s *Service) Join(ctx context.Context, id string, userID int64) error {
 				}
 				ok, err := s.tg.CheckMembership(ctx, userID, chat)
 				if err != nil {
-					// treat as satisfied on telegram error
+					continue
+				}
+				if !ok {
+					return errors.New("requirements not satisfied")
+				}
+			case dg.RequirementTypeBoost:
+				chat := ""
+				if req.ChannelID != 0 {
+					chat = fmt.Sprintf("%d", req.ChannelID)
+				} else if req.ChannelUsername != "" {
+					chat = "@" + req.ChannelUsername
+				}
+				if chat == "" {
+					continue
+				}
+				ok, err := s.tg.CheckBoost(ctx, userID, chat)
+				if err != nil {
 					continue
 				}
 				if !ok {

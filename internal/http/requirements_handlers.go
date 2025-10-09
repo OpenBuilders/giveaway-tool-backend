@@ -16,5 +16,6 @@ func (h *RequirementsHandlers) RegisterFiber(r fiber.Router) {
 func (h *RequirementsHandlers) listTypes(c *fiber.Ctx) error {
 	return c.JSON([]fiber.Map{
 		{"type": "subscription", "description": "User must be a member of specified channels"},
+		{"type": "boost", "description": "User must have active boost in specified channels"},
 	})
 }

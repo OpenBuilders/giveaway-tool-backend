@@ -13,6 +13,7 @@ func NewChannelHandlers(tgc *tg.Client) *ChannelHandlers { return &ChannelHandle
 func (h *ChannelHandlers) RegisterFiber(r fiber.Router) {
 	r.Get("/channels/:username/info", h.getChannelInfo)
 	r.Get("/channels/:chat/membership", h.checkMembership)
+	r.Get("/channels/:chat/boost", h.checkBoost)
 }
 
 func (h *ChannelHandlers) getChannelInfo(c *fiber.Ctx) error {
@@ -31,6 +32,19 @@ func (h *ChannelHandlers) checkMembership(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing user_id"})
 	}
 	ok, err := h.tg.CheckMembership(c.Context(), int64(userID), chat)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"ok": ok})
+}
+
+func (h *ChannelHandlers) checkBoost(c *fiber.Ctx) error {
+	chat := c.Params("chat")
+	userID := c.QueryInt("user_id", 0)
+	if userID == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing user_id"})
+	}
+	ok, err := h.tg.CheckBoost(c.Context(), int64(userID), chat)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
