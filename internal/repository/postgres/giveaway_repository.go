@@ -77,7 +77,7 @@ func (r *GiveawayRepository) GetByID(ctx context.Context, id string) (*dg.Giveaw
 		}
 		return nil, err
 	}
-    // Prizes
+	// Prizes
 	const qp = `SELECT place, title, description, quantity FROM giveaway_prizes WHERE giveaway_id=$1 ORDER BY place NULLS LAST, place ASC`
 	rows, err := r.db.QueryContext(ctx, qp, id)
 	if err == nil {
@@ -102,12 +102,12 @@ func (r *GiveawayRepository) GetByID(ctx context.Context, id string) (*dg.Giveaw
 	} else {
 		return nil, err
 	}
-    // Participants count
-    if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM giveaway_participants WHERE giveaway_id=$1`, id).Scan(&g.ParticipantsCount); err != nil {
-        return nil, err
-    }
+	// Participants count
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM giveaway_participants WHERE giveaway_id=$1`, id).Scan(&g.ParticipantsCount); err != nil {
+		return nil, err
+	}
 
-    // Sponsors
+	// Sponsors
 	const qs = `SELECT username, url, title, channel_id FROM giveaway_sponsors WHERE giveaway_id=$1`
 	srows, err := r.db.QueryContext(ctx, qs, id)
 	if err == nil {
@@ -125,27 +125,50 @@ func (r *GiveawayRepository) GetByID(ctx context.Context, id string) (*dg.Giveaw
 	} else {
 		return nil, err
 	}
-    // If finished, load winners and their prizes
-    if g.Status == dg.GiveawayStatusFinished {
-        // Winners by place
-        wrows, err := r.db.QueryContext(ctx, `SELECT place, user_id FROM giveaway_winners WHERE giveaway_id=$1 ORDER BY place ASC`, id)
-        if err != nil { return nil, err }
-        type winner struct { place int; user int64 }
-        var winners []winner
-        for wrows.Next() { var pl int; var uid int64; if err := wrows.Scan(&pl, &uid); err != nil { wrows.Close(); return nil, err }; winners = append(winners, winner{place: pl, user: uid}) }
-        wrows.Close()
-        // Prizes per user
-        prizemap := map[int64][]dg.WinnerPrize{}
-        prows, err := r.db.QueryContext(ctx, `SELECT user_id, prize_title, prize_description FROM giveaway_winner_prizes WHERE giveaway_id=$1`, id)
-        if err != nil { return nil, err }
-        for prows.Next() { var uid int64; var t, d string; if err := prows.Scan(&uid, &t, &d); err != nil { prows.Close(); return nil, err }; prizemap[uid] = append(prizemap[uid], dg.WinnerPrize{Title: t, Description: d}) }
-        prows.Close()
-        // Build DTO
-        for _, w := range winners {
-            g.Winners = append(g.Winners, dg.Winner{Place: w.place, UserID: w.user, Prizes: prizemap[w.user]})
-        }
-    }
-    return &g, nil
+	// If finished, load winners and their prizes
+	if g.Status == dg.GiveawayStatusFinished {
+		// Winners by place
+		wrows, err := r.db.QueryContext(ctx, `SELECT place, user_id FROM giveaway_winners WHERE giveaway_id=$1 ORDER BY place ASC`, id)
+		if err != nil {
+			return nil, err
+		}
+		type winner struct {
+			place int
+			user  int64
+		}
+		var winners []winner
+		for wrows.Next() {
+			var pl int
+			var uid int64
+			if err := wrows.Scan(&pl, &uid); err != nil {
+				wrows.Close()
+				return nil, err
+			}
+			winners = append(winners, winner{place: pl, user: uid})
+		}
+		wrows.Close()
+		// Prizes per user
+		prizemap := map[int64][]dg.WinnerPrize{}
+		prows, err := r.db.QueryContext(ctx, `SELECT user_id, prize_title, prize_description FROM giveaway_winner_prizes WHERE giveaway_id=$1`, id)
+		if err != nil {
+			return nil, err
+		}
+		for prows.Next() {
+			var uid int64
+			var t, d string
+			if err := prows.Scan(&uid, &t, &d); err != nil {
+				prows.Close()
+				return nil, err
+			}
+			prizemap[uid] = append(prizemap[uid], dg.WinnerPrize{Title: t, Description: d})
+		}
+		prows.Close()
+		// Build DTO
+		for _, w := range winners {
+			g.Winners = append(g.Winners, dg.Winner{Place: w.place, UserID: w.user, Prizes: prizemap[w.user]})
+		}
+	}
+	return &g, nil
 }
 
 // ListByCreator returns giveaways for a specific creator ordered by created_at desc.
