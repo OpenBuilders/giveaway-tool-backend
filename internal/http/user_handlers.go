@@ -7,18 +7,18 @@ import (
 	"github.com/gofiber/fiber/v2"
 
 	domain "github.com/your-org/giveaway-backend/internal/domain/user"
+	chsvc "github.com/your-org/giveaway-backend/internal/service/channels"
 	usersvc "github.com/your-org/giveaway-backend/internal/service/user"
-    chsvc "github.com/your-org/giveaway-backend/internal/service/channels"
 )
 
 // UserHandlersFiber wires Fiber endpoints to the UserService.
-type UserHandlersFiber struct{
-    service *usersvc.Service
-    channels *chsvc.Service
+type UserHandlersFiber struct {
+	service  *usersvc.Service
+	channels *chsvc.Service
 }
 
 func NewUserHandlersFiber(svc *usersvc.Service, ch *chsvc.Service) *UserHandlersFiber {
-    return &UserHandlersFiber{service: svc, channels: ch}
+	return &UserHandlersFiber{service: svc, channels: ch}
 }
 
 // RegisterFiber registers routes on a Fiber router (app or group).
@@ -27,7 +27,7 @@ func (h *UserHandlersFiber) RegisterFiber(r fiber.Router) {
 	r.Post("/users", h.createOrUpdateUser)
 	r.Get("/users/:id", h.getUserByID)
 	r.Delete("/users/:id", h.deleteUser)
-    r.Get("/users/:id/channels", h.listUserChannels)
+	r.Get("/users/:id/channels", h.listUserChannels)
 }
 
 func (h *UserHandlersFiber) listUsers(c *fiber.Ctx) error {
@@ -82,10 +82,16 @@ func (h *UserHandlersFiber) deleteUser(c *fiber.Ctx) error {
 }
 
 func (h *UserHandlersFiber) listUserChannels(c *fiber.Ctx) error {
-    id, err := c.ParamsInt("id")
-    if err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid id"}) }
-    if h.channels == nil { return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "channels service not configured"}) }
-    items, err := h.channels.ListUserChannels(c.Context(), int64(id))
-    if err != nil { return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()}) }
-    return c.JSON(items)
+	id, err := c.ParamsInt("id")
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid id"})
+	}
+	if h.channels == nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "channels service not configured"})
+	}
+	items, err := h.channels.ListUserChannels(c.Context(), int64(id))
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(items)
 }

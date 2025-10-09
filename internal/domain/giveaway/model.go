@@ -46,4 +46,19 @@ type Giveaway struct {
 	UpdatedAt       time.Time      `json:"updated_at"`
 	Prizes          []PrizePlace   `json:"prizes,omitempty"`
 	Sponsors        []ChannelInfo  `json:"sponsors"`
+    Winners         []Winner       `json:"winners,omitempty"`
+    ParticipantsCount int          `json:"participants_count"`
+}
+
+// WinnerPrize describes a prize assigned to a winner.
+type WinnerPrize struct {
+    Title       string `json:"title"`
+    Description string `json:"description"`
+}
+
+// Winner represents a winner with place and assigned prizes.
+type Winner struct {
+    Place  int           `json:"place"`
+    UserID int64         `json:"user_id"`
+    Prizes []WinnerPrize `json:"prizes,omitempty"`
 }

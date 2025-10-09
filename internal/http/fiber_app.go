@@ -8,10 +8,10 @@ import (
 
 	rcache "github.com/your-org/giveaway-backend/internal/cache/redis"
 	"github.com/your-org/giveaway-backend/internal/config"
-    "github.com/your-org/giveaway-backend/internal/service/channels"
 	mw "github.com/your-org/giveaway-backend/internal/http/middleware"
 	redisp "github.com/your-org/giveaway-backend/internal/platform/redis"
 	pgrepo "github.com/your-org/giveaway-backend/internal/repository/postgres"
+	"github.com/your-org/giveaway-backend/internal/service/channels"
 	gsvc "github.com/your-org/giveaway-backend/internal/service/giveaway"
 	usersvc "github.com/your-org/giveaway-backend/internal/service/user"
 )
@@ -26,11 +26,11 @@ func NewFiberApp(pg *sql.DB, rdb *redisp.Client, cfg *config.Config) *fiber.App 
 	})
 
 	// User domain deps
-    repo := pgrepo.NewUserRepository(pg)
-    cache := rcache.NewUserCache(rdb, 5*time.Minute)
-    us := usersvc.NewService(repo, cache)
-    chs := channels.NewService(rdb)
-    uh := NewUserHandlersFiber(us, chs)
+	repo := pgrepo.NewUserRepository(pg)
+	cache := rcache.NewUserCache(rdb, 5*time.Minute)
+	us := usersvc.NewService(repo, cache)
+	chs := channels.NewService(rdb)
+	uh := NewUserHandlersFiber(us, chs)
 
 	// Giveaway domain deps
 	gRepo := pgrepo.NewGiveawayRepository(pg)
