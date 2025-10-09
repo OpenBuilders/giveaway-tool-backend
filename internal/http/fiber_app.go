@@ -57,7 +57,7 @@ func NewFiberApp(pg *sql.DB, rdb *redisp.Client, cfg *config.Config) *fiber.App 
 	// Telegram channels endpoints (public; no init-data required)
 	ch := NewChannelHandlers(tgClient)
 	ch.RegisterFiber(v1)
-	rq := NewRequirementsHandlers()
+	rq := NewRequirementsHandlers(tgClient)
 	rq.RegisterFiber(v1)
 
 	return app

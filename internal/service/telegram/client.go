@@ -18,6 +18,7 @@ type Client struct {
 	httpClient *http.Client
 	token      string
 	logger     *log.Logger
+	botID      int64
 }
 
 func NewClientFromEnv() *Client {
@@ -41,9 +42,16 @@ type tgResponse[T any] struct {
 	Result      T      `json:"result"`
 }
 
+type user struct {
+	ID       int64  `json:"id"`
+	IsBot    bool   `json:"is_bot"`
+	Username string `json:"username"`
+}
+
 // PublicChannelInfo is the response DTO for GET channel info.
 type PublicChannelInfo struct {
 	ID         int64  `json:"id"`
+	Type       string `json:"type"`
 	Username   string `json:"username"`
 	ChannelURL string `json:"channel_url"`
 	AvatarURL  string `json:"avatar_url"`
@@ -79,6 +87,7 @@ func (c *Client) GetPublicChannelInfo(ctx context.Context, username string) (*Pu
 
 	return &PublicChannelInfo{
 		ID:         result.Result.ID,
+		Type:       result.Result.Type,
 		Username:   username,
 		ChannelURL: fmt.Sprintf("https://t.me/%s", username),
 		AvatarURL:  avatarURL,
@@ -115,6 +124,7 @@ func (c *Client) GetPublicChannelInfoByID(ctx context.Context, id int64) (*Publi
 
 	return &PublicChannelInfo{
 		ID:       result.Result.ID,
+		Type:     result.Result.Type,
 		Username: username,
 		ChannelURL: func() string {
 			if username == "" {
@@ -249,4 +259,140 @@ func (c *Client) CheckBoost(ctx context.Context, userID int64, chatID string) (b
 		return false, fmt.Errorf("telegram API error: %s", response.Error)
 	}
 	return len(response.Result.Boosts) > 0, nil
+}
+
+// ensureBotID retrieves and caches the bot's own user ID via getMe.
+func (c *Client) ensureBotID(ctx context.Context) (int64, error) {
+	if c.botID != 0 {
+		return c.botID, nil
+	}
+	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/getMe", c.token)
+	var resp tgResponse[user]
+	if err := c.makeRequest(ctx, http.MethodGet, endpoint, nil, &resp); err != nil {
+		return 0, err
+	}
+	if !resp.Ok || resp.Result.ID == 0 {
+		if resp.Description != "" {
+			return 0, fmt.Errorf("getMe failed: %s", resp.Description)
+		}
+		return 0, fmt.Errorf("getMe failed")
+	}
+	c.botID = resp.Result.ID
+	return c.botID, nil
+}
+
+// IsBotMember checks whether the bot is a member/admin/creator of the chat.
+// chat can be @username or numeric id as string.
+func (c *Client) IsBotMember(ctx context.Context, chat string) (bool, error) {
+	botID, err := c.ensureBotID(ctx)
+
+	if err != nil {
+		return false, err
+	}
+
+	var numericChatID int64
+	if len(chat) > 0 && chat[0] == '@' {
+		ch, err := c.GetPublicChannelInfo(ctx, chat)
+		if err != nil {
+			return false, fmt.Errorf("failed to get chat info: %w", err)
+		}
+		numericChatID = ch.ID
+	} else {
+		id, err := strconv.ParseInt(chat, 10, 64)
+		if err != nil {
+			// treat as username without @
+			ch, err := c.GetPublicChannelInfo(ctx, chat)
+			if err != nil {
+				return false, fmt.Errorf("failed to get chat info: %w", err)
+			}
+			numericChatID = ch.ID
+		} else {
+			numericChatID = id
+		}
+	}
+
+	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/getChatMember", c.token)
+	data := url.Values{
+		"chat_id": {fmt.Sprintf("%d", numericChatID)},
+		"user_id": {fmt.Sprintf("%d", botID)},
+	}
+	var response struct {
+		Ok     bool       `json:"ok"`
+		Error  string     `json:"error"`
+		Result ChatMember `json:"result"`
+	}
+	if err := c.makeRequest(ctx, http.MethodGet, endpoint, data, &response); err != nil {
+		return false, fmt.Errorf("failed to check bot membership: %w", err)
+	}
+	if !response.Ok {
+		if strings.Contains(response.Error, "Too Many Requests") {
+			return false, fmt.Errorf("rate limit exceeded")
+		}
+
+		return false, fmt.Errorf("Bot is not a member of the chat")
+	}
+	switch response.Result.Status {
+	case "creator", "administrator", "member", "restricted":
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+
+// GetBotMemberStatus returns raw membership status for the bot and whether it can check members
+// (true when bot is administrator or has permissions to manage chat).
+func (c *Client) GetBotMemberStatus(ctx context.Context, chat string) (string, bool, error) {
+	botID, err := c.ensureBotID(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	var numericChatID int64
+	if len(chat) > 0 && chat[0] == '@' {
+		ch, err := c.GetPublicChannelInfo(ctx, chat)
+		if err != nil {
+			return "", false, fmt.Errorf("failed to get chat info: %w", err)
+		}
+		numericChatID = ch.ID
+	} else {
+		id, err := strconv.ParseInt(chat, 10, 64)
+		if err != nil {
+			ch, err := c.GetPublicChannelInfo(ctx, chat)
+			if err != nil {
+				return "", false, fmt.Errorf("failed to get chat info: %w", err)
+			}
+			numericChatID = ch.ID
+		} else {
+			numericChatID = id
+		}
+	}
+
+	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/getChatMember", c.token)
+	data := url.Values{
+		"chat_id": {fmt.Sprintf("%d", numericChatID)},
+		"user_id": {fmt.Sprintf("%d", botID)},
+	}
+	var response struct {
+		Ok     bool   `json:"ok"`
+		Error  string `json:"error"`
+		Result struct {
+			Status string `json:"status"`
+			// admin permissions (subset); presence implies can_check_members true
+			CanInviteUsers     bool `json:"can_invite_users"`
+			CanDeleteMessages  bool `json:"can_delete_messages"`
+			CanRestrictMembers bool `json:"can_restrict_members"`
+			CanManageChat      bool `json:"can_manage_chat"`
+		} `json:"result"`
+	}
+	if err := c.makeRequest(ctx, http.MethodGet, endpoint, data, &response); err != nil {
+		return "", false, fmt.Errorf("failed to check bot membership: %w", err)
+	}
+	if !response.Ok {
+		if strings.Contains(response.Error, "Too Many Requests") {
+			return "", false, fmt.Errorf("rate limit exceeded")
+		}
+		return "", false, fmt.Errorf("telegram API error: %s", response.Error)
+	}
+	status := response.Result.Status
+	can := status == "administrator" || status == "creator" || response.Result.CanManageChat || response.Result.CanRestrictMembers || response.Result.CanDeleteMessages
+	return status, can, nil
 }

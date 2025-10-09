@@ -3,6 +3,7 @@ package channels
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strconv"
 
 	"github.com/redis/go-redis/v9"
@@ -11,9 +12,10 @@ import (
 
 // Channel holds minimal channel info via Redis storage
 type Channel struct {
-	ID       int64  `json:"id"`
-	Title    string `json:"title"`
-	Username string `json:"username"`
+	ID        int64  `json:"id"`
+	Title     string `json:"title"`
+	Username  string `json:"username"`
+	AvatarURL string `json:"avatar_url,omitempty"`
 }
 
 // Service provides access to Telegram channel data stored in Redis.
@@ -28,7 +30,8 @@ func NewService(rdb *rplatform.Client) *Service { return &Service{rdb: rdb} }
 func (s *Service) GetByID(ctx context.Context, id int64) (*Channel, error) {
 	title, _ := s.rdb.Get(ctx, fmt.Sprintf("channel:%d:title", id)).Result()
 	username, _ := s.rdb.Get(ctx, fmt.Sprintf("channel:%d:username", id)).Result()
-	return &Channel{ID: id, Title: title, Username: username}, nil
+	avatar := buildAvatarURL(username, title)
+	return &Channel{ID: id, Title: title, Username: username, AvatarURL: avatar}, nil
 }
 
 // ListUserChannels returns all channels for a user by reading set user:{id}:channels
@@ -70,7 +73,19 @@ func (s *Service) ListUserChannels(ctx context.Context, userID int64) ([]Channel
 		}
 		title, _ := titleCmds[i].Result()
 		username, _ := usernameCmds[i].Result()
-		out = append(out, Channel{ID: id, Title: title, Username: username})
+		avatar := buildAvatarURL(username, title)
+		out = append(out, Channel{ID: id, Title: title, Username: username, AvatarURL: avatar})
 	}
 	return out, nil
+}
+
+// buildAvatarURL prefers Telegram's public avatar URL by username; falls back to placeholder by title.
+func buildAvatarURL(username, title string) string {
+	if username != "" {
+		return fmt.Sprintf("https://t.me/i/userpic/160/%s.jpg", username)
+	}
+	if title == "" {
+		return ""
+	}
+	return "https://ui-avatars.com/api/?background=random&size=128&name=" + url.QueryEscape(title)
 }
