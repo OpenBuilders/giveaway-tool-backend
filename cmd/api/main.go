@@ -5,12 +5,15 @@ import (
 	"log"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/your-org/giveaway-backend/internal/config"
 	apphttp "github.com/your-org/giveaway-backend/internal/http"
 	"github.com/your-org/giveaway-backend/internal/platform/db"
 	redisplatform "github.com/your-org/giveaway-backend/internal/platform/redis"
+	pgrepo "github.com/your-org/giveaway-backend/internal/repository/postgres"
+	gsvc "github.com/your-org/giveaway-backend/internal/service/giveaway"
 )
 
 func main() {
@@ -40,6 +43,25 @@ func main() {
 	defer rdb.Close()
 
 	app := apphttp.NewFiberApp(pg, rdb, cfg)
+
+	// Start background worker for finishing expired giveaways
+	expSvc := gsvc.NewService(pgrepo.NewGiveawayRepository(pg))
+	go func() {
+		ticker := time.NewTicker(time.Duration(cfg.GiveawayExpireIntervalSec) * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if n, err := expSvc.FinishExpired(context.Background()); err != nil {
+					log.Printf("finish expired error: %v", err)
+				} else if n > 0 {
+					log.Printf("finished %d expired giveaways", n)
+				}
+			}
+		}
+	}()
 	go func() {
 		log.Printf("HTTP server (Fiber) listening on %s", cfg.HTTPAddr)
 		if err := app.Listen(cfg.HTTPAddr); err != nil {

@@ -8,16 +8,18 @@ import (
 
 	domain "github.com/your-org/giveaway-backend/internal/domain/user"
 	mw "github.com/your-org/giveaway-backend/internal/http/middleware"
-	"github.com/your-org/giveaway-backend/internal/service"
+	usersvc "github.com/your-org/giveaway-backend/internal/service/user"
+    chsvc "github.com/your-org/giveaway-backend/internal/service/channels"
 )
 
 // UserHandlersFiber wires Fiber endpoints to the UserService.
-type UserHandlersFiber struct {
-	service *service.UserService
+type UserHandlersFiber struct{
+    service *usersvc.Service
+    channels *chsvc.Service
 }
 
-func NewUserHandlersFiber(svc *service.UserService) *UserHandlersFiber {
-	return &UserHandlersFiber{service: svc}
+func NewUserHandlersFiber(svc *usersvc.Service, ch *chsvc.Service) *UserHandlersFiber {
+    return &UserHandlersFiber{service: svc, channels: ch}
 }
 
 // RegisterFiber registers routes on a Fiber router (app or group).
@@ -27,6 +29,7 @@ func (h *UserHandlersFiber) RegisterFiber(r fiber.Router) {
 	r.Get("/users/me", h.getMe)
 	r.Get("/users/:id", h.getUserByID)
 	r.Delete("/users/:id", h.deleteUser)
+    r.Get("/users/:id/channels", h.listUserChannels)
 }
 
 func (h *UserHandlersFiber) listUsers(c *fiber.Ctx) error {
@@ -127,4 +130,13 @@ func (h *UserHandlersFiber) getMe(c *fiber.Ctx) error {
 		Username:  username,
 		Role:      role,
 	})
+}
+
+func (h *UserHandlersFiber) listUserChannels(c *fiber.Ctx) error {
+    id, err := c.ParamsInt("id")
+    if err != nil { return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid id"}) }
+    if h.channels == nil { return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "channels service not configured"}) }
+    items, err := h.channels.ListUserChannels(c.Context(), int64(id))
+    if err != nil { return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()}) }
+    return c.JSON(items)
 }

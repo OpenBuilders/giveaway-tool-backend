@@ -9,10 +9,12 @@ import (
 
 	rcache "github.com/your-org/giveaway-backend/internal/cache/redis"
 	"github.com/your-org/giveaway-backend/internal/config"
+    "github.com/your-org/giveaway-backend/internal/service/channels"
 	mw "github.com/your-org/giveaway-backend/internal/http/middleware"
 	redisp "github.com/your-org/giveaway-backend/internal/platform/redis"
 	pgrepo "github.com/your-org/giveaway-backend/internal/repository/postgres"
-	"github.com/your-org/giveaway-backend/internal/service"
+	gsvc "github.com/your-org/giveaway-backend/internal/service/giveaway"
+	usersvc "github.com/your-org/giveaway-backend/internal/service/user"
 )
 
 // NewFiberApp builds a Fiber application with routes and middlewares wired.
@@ -31,17 +33,24 @@ func NewFiberApp(pg *sql.DB, rdb *redisp.Client, cfg *config.Config) *fiber.App 
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{"status": "ok"})
 	})
 
-	// Dependencies for user domain
-	repo := pgrepo.NewUserRepository(pg)
-	cache := rcache.NewUserCache(rdb, 5*time.Minute)
-	svc := service.NewUserService(repo, cache, 5*time.Minute)
-	uh := NewUserHandlersFiber(svc)
+	// User domain deps
+    repo := pgrepo.NewUserRepository(pg)
+    cache := rcache.NewUserCache(rdb, 5*time.Minute)
+    us := usersvc.NewService(repo, cache)
+    chs := channels.NewService(rdb)
+    uh := NewUserHandlersFiber(us, chs)
+
+	// Giveaway domain deps
+	gRepo := pgrepo.NewGiveawayRepository(pg)
+	gs := gsvc.NewService(gRepo)
+	gh := NewGiveawayHandlersFiber(gs)
 
 	// API groups
 	ttl := time.Duration(cfg.InitDataTTL) * time.Second
 	api := app.Group("/api")
 	v1 := api.Group("/v1", mw.InitDataMiddleware(cfg.TelegramBotToken, ttl))
 	uh.RegisterFiber(v1)
+	gh.RegisterFiber(v1)
 
 	return app
 }
