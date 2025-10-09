@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/joho/godotenv"
 	"github.com/your-org/giveaway-backend/internal/config"
 	apphttp "github.com/your-org/giveaway-backend/internal/http"
 	"github.com/your-org/giveaway-backend/internal/platform/db"
@@ -16,6 +17,10 @@ func main() {
 	// Create cancellable root context for graceful shutdown.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// Load local environment variables from .env files for non-Docker/dev runs.
+	_ = godotenv.Load()                 // loads ".env" if present (does not override existing env)
+	_ = godotenv.Overload(".env.local") // optional: allow .env.local to override
 
 	cfg, err := config.Load()
 	if err != nil {

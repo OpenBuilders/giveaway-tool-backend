@@ -13,6 +13,8 @@ type Config struct {
 	RedisAddr     string
 	RedisPassword string
 	RedisDB       int
+	// CORS settings
+	CORSAllowedOrigins string
 	// Telegram init-data validation settings
 	TelegramBotToken string // Bot token for first-party validation
 	InitDataTTL      int    // TTL in seconds for init-data expiration (0 to skip)
@@ -21,11 +23,12 @@ type Config struct {
 // Load reads environment variables into Config with sane defaults for local dev.
 func Load() (*Config, error) {
 	cfg := &Config{
-		HTTPAddr:         getEnv("HTTP_ADDR", ":8080"),
-		DatabaseURL:      getEnv("DATABASE_URL", "postgres://user:password@localhost:5432/giveaway?sslmode=disable"),
-		RedisAddr:        getEnv("REDIS_ADDR", "localhost:6379"),
-		RedisPassword:    getEnv("REDIS_PASSWORD", ""),
-		TelegramBotToken: getEnv("TELEGRAM_BOT_TOKEN", ""),
+		HTTPAddr:           getEnv("HTTP_ADDR", ":8080"),
+		DatabaseURL:        getEnv("DATABASE_URL", "postgres://user:password@localhost:5432/giveaway?sslmode=disable"),
+		RedisAddr:          getEnv("REDIS_ADDR", "localhost:6379"),
+		RedisPassword:      getEnv("REDIS_PASSWORD", ""),
+		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "*"),
+		TelegramBotToken:   getEnv("TELEGRAM_BOT_TOKEN", ""),
 	}
 	redisDBStr := getEnv("REDIS_DB", "0")
 	dbNum, err := strconv.Atoi(redisDBStr)
