@@ -1,0 +1,17 @@
+# Binaries
+/bin/
+/build/
+/dist/
+*.exe
+*.out
+*.test
+
+# IDE
+.idea/
+.vscode/
+
+# Env
+.env
+
+# OS
+.DS_Store
