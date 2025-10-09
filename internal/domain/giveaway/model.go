@@ -25,10 +25,11 @@ type PrizePlace struct {
 
 // ChannelInfo describes a sponsor Telegram channel or user.
 type ChannelInfo struct {
-	ID       int64  `json:"id"`
-	Username string `json:"username"`
-	URL      string `json:"url,omitempty"`
-	Title    string `json:"title,omitempty"`
+	ID        int64  `json:"id"`
+	Username  string `json:"username"`
+	AvatarURL string `json:"avatar_url,omitempty"`
+	URL       string `json:"url,omitempty"`
+	Title     string `json:"title,omitempty"`
 }
 
 // Giveaway is the aggregate representing a giveaway created by a user.

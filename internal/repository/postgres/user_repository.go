@@ -20,7 +20,7 @@ func NewUserRepository(db *sql.DB) *UserRepository { return &UserRepository{db: 
 func (r *UserRepository) Upsert(ctx context.Context, u *domain.User) error {
 	const q = `
 	INSERT INTO users (id, username, first_name, last_name, role, status, created_at, updated_at)
-	VALUES ($1, lower(nullif($2, )), $3, $4, $5, $6, COALESCE($7, now()), COALESCE($8, now()))
+	VALUES ($1, lower(NULLIF($2, '')), $3, $4, $5, $6, COALESCE($7, now()), COALESCE($8, now()))
 	ON CONFLICT (id) DO UPDATE SET
 		username = EXCLUDED.username,
 		first_name = EXCLUDED.first_name,

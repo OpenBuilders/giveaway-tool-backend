@@ -24,11 +24,11 @@ func NewUserHandlersFiber(svc *usersvc.Service, ch *chsvc.Service) *UserHandlers
 
 // RegisterFiber registers routes on a Fiber router (app or group).
 func (h *UserHandlersFiber) RegisterFiber(r fiber.Router) {
-	r.Get("/users", h.listUsers)
-	r.Post("/users", h.createOrUpdateUser)
+	// r.Get("/users", h.listUsers)
+	// r.Post("/users", h.createOrUpdateUser)
 	r.Get("/users/me", h.getMe)
-	r.Get("/users/:id", h.getUserByID)
-	r.Delete("/users/:id", h.deleteUser)
+	// r.Get("/users/:id", h.getUserByID)
+	// r.Delete("/users/:id", h.deleteUser)
 	r.Get("/users/:id/channels", h.listUserChannels)
 }
 
@@ -113,6 +113,18 @@ func (h *UserHandlersFiber) getMe(c *fiber.Ctx) error {
 	role := "user"
 	if u, err := h.service.GetByID(c.Context(), userID); err == nil && u != nil && u.Role != "" {
 		role = u.Role
+	}
+
+	// create or update user
+	if err := h.service.Upsert(c.Context(), &domain.User{
+		ID:        userID,
+		FirstName: firstName,
+		LastName:  lastName,
+		Username:  username,
+		Role:      role,
+		Status:    "active",
+	}); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
 	type meResponse struct {

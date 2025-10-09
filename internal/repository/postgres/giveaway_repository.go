@@ -54,9 +54,9 @@ func (r *GiveawayRepository) Create(ctx context.Context, g *dg.Giveaway) error {
 		}
 	}
 
-	const qSponsor = `INSERT INTO giveaway_sponsors (giveaway_id, username, url, title, channel_id) VALUES ($1,$2,$3,$4,$5)`
+	const qSponsor = `INSERT INTO giveaway_sponsors (giveaway_id, username, url, title, channel_id, avatar_url) VALUES ($1,$2,$3,$4,$5,$6)`
 	for _, s := range g.Sponsors {
-		if _, err = tx.ExecContext(ctx, qSponsor, g.ID, s.Username, s.URL, s.Title, s.ID); err != nil {
+		if _, err = tx.ExecContext(ctx, qSponsor, g.ID, s.Username, s.URL, s.Title, s.ID, s.AvatarURL); err != nil {
 			return err
 		}
 	}
@@ -108,13 +108,13 @@ func (r *GiveawayRepository) GetByID(ctx context.Context, id string) (*dg.Giveaw
 	}
 
 	// Sponsors
-	const qs = `SELECT username, url, title, channel_id FROM giveaway_sponsors WHERE giveaway_id=$1`
+	const qs = `SELECT username, url, title, channel_id, avatar_url FROM giveaway_sponsors WHERE giveaway_id=$1`
 	srows, err := r.db.QueryContext(ctx, qs, id)
 	if err == nil {
 		defer srows.Close()
 		for srows.Next() {
 			var s dg.ChannelInfo
-			if err := srows.Scan(&s.Username, &s.URL, &s.Title, &s.ID); err != nil {
+			if err := srows.Scan(&s.Username, &s.URL, &s.Title, &s.ID, &s.AvatarURL); err != nil {
 				return nil, err
 			}
 			g.Sponsors = append(g.Sponsors, s)

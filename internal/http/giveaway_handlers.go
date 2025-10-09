@@ -7,14 +7,20 @@ import (
 
 	dg "github.com/your-org/giveaway-backend/internal/domain/giveaway"
 	"github.com/your-org/giveaway-backend/internal/http/middleware"
+	chsvc "github.com/your-org/giveaway-backend/internal/service/channels"
 	gsvc "github.com/your-org/giveaway-backend/internal/service/giveaway"
+	tgsvc "github.com/your-org/giveaway-backend/internal/service/telegram"
 )
 
 // GiveawayHandlersFiber provides Fiber endpoints for giveaways.
-type GiveawayHandlersFiber struct{ service *gsvc.Service }
+type GiveawayHandlersFiber struct {
+	service  *gsvc.Service
+	channels *chsvc.Service
+	telegram *tgsvc.Client
+}
 
-func NewGiveawayHandlersFiber(svc *gsvc.Service) *GiveawayHandlersFiber {
-	return &GiveawayHandlersFiber{service: svc}
+func NewGiveawayHandlersFiber(svc *gsvc.Service, chs *chsvc.Service, tg *tgsvc.Client) *GiveawayHandlersFiber {
+	return &GiveawayHandlersFiber{service: svc, channels: chs, telegram: tg}
 }
 
 func (h *GiveawayHandlersFiber) RegisterFiber(r fiber.Router) {
@@ -25,24 +31,105 @@ func (h *GiveawayHandlersFiber) RegisterFiber(r fiber.Router) {
 	r.Patch("/giveaways/:id/status", h.updateStatus)
 	r.Delete("/giveaways/:id", h.delete)
 	r.Post("/giveaways/:id/join", h.join)
+	r.Get("/prizes/templates", h.listPrizeTemplates)
+}
+
+type createPrizeReq struct {
+	Place       *int   `json:"place,omitempty"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	Quantity    int    `json:"quantity,omitempty"`
+}
+
+type createSponsorReq struct {
+	ID int64 `json:"id"`
+}
+
+type createGiveawayReq struct {
+	Title           string             `json:"title"`
+	Duration        int64              `json:"duration"`
+	WinnersCount    int                `json:"winners_count"`
+	Prizes          []createPrizeReq   `json:"prizes"`
+	Description     string             `json:"description,omitempty"`
+	MaxParticipants *int               `json:"max_participants,omitempty"`
+	Requirements    []interface{}      `json:"requirements,omitempty"`
+	Sponsors        []createSponsorReq `json:"sponsors,omitempty"`
 }
 
 // create handles creation of a new giveaway.
 func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
-	var g dg.Giveaway
-	if err := c.BodyParser(&g); err != nil {
+	var req createGiveawayReq
+	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid json"})
 	}
+
+	// Build domain model
+	now := time.Now().UTC()
+	g := dg.Giveaway{
+		Title:           req.Title,
+		Description:     req.Description,
+		StartedAt:       now,
+		EndsAt:          now.Add(time.Duration(req.Duration) * time.Second),
+		Duration:        req.Duration,
+		MaxWinnersCount: req.WinnersCount,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+
 	// Force creator from Telegram init-data context
 	if userIDVal := c.Locals(middleware.UserIdCtxParam); userIDVal != nil {
 		if id, ok := userIDVal.(int64); ok {
 			g.CreatorID = id
 		}
 	}
-	if g.CreatedAt.IsZero() {
-		g.CreatedAt = time.Now().UTC()
+
+	// Map prizes
+	for _, p := range req.Prizes {
+		qty := p.Quantity
+		if qty <= 0 {
+			qty = 1
+		}
+		g.Prizes = append(g.Prizes, dg.PrizePlace{
+			Place:       p.Place,
+			Title:       p.Title,
+			Description: p.Description,
+			Quantity:    qty,
+		})
 	}
-	g.UpdatedAt = time.Now().UTC()
+
+	// Map sponsors: resolve full info by id using Telegram API, fallback to Redis cache
+	for _, s := range req.Sponsors {
+		if s.ID == 0 {
+			g.Sponsors = append(g.Sponsors, dg.ChannelInfo{ID: s.ID})
+			continue
+		}
+		// Try Telegram API by ID
+		if h.telegram != nil {
+			if info, err := h.telegram.GetPublicChannelInfoByID(c.Context(), s.ID); err == nil && info != nil {
+				g.Sponsors = append(g.Sponsors, dg.ChannelInfo{
+					ID:        info.ID,
+					Title:     info.Title,
+					Username:  info.Username,
+					URL:       info.ChannelURL,
+					AvatarURL: info.AvatarURL,
+				})
+				continue
+			}
+		}
+		// Fallback to Redis cache
+		if h.channels != nil {
+			ch, _ := h.channels.GetByID(c.Context(), s.ID)
+			if ch != nil {
+				var url string
+				if ch.Username != "" {
+					url = "https://t.me/" + ch.Username
+				}
+				g.Sponsors = append(g.Sponsors, dg.ChannelInfo{ID: ch.ID, Title: ch.Title, Username: ch.Username, URL: url})
+				continue
+			}
+		}
+		g.Sponsors = append(g.Sponsors, dg.ChannelInfo{ID: s.ID})
+	}
 
 	id, err := h.service.Create(c.Context(), &g)
 	if err != nil {
@@ -139,4 +226,19 @@ func (h *GiveawayHandlersFiber) listFinishedByCreator(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(list)
+}
+
+// listPrizeTemplates returns the available prize templates for the frontend.
+func (h *GiveawayHandlersFiber) listPrizeTemplates(c *fiber.Ctx) error {
+	type prizeTemplate struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+		Type        string `json:"type"`
+	}
+
+	templates := []prizeTemplate{
+		{Name: "Custom", Description: "Free-form custom prize", Type: "custom"},
+	}
+
+	return c.JSON(templates)
 }

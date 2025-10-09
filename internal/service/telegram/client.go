@@ -85,6 +85,47 @@ func (c *Client) GetPublicChannelInfo(ctx context.Context, username string) (*Pu
 	}, nil
 }
 
+// GetPublicChannelInfoByID fetches public info by numeric channel id using Telegram API.
+func (c *Client) GetPublicChannelInfoByID(ctx context.Context, id int64) (*PublicChannelInfo, error) {
+	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/getChat", c.token)
+	params := url.Values{"chat_id": {fmt.Sprintf("%d", id)}}
+
+	var result tgResponse[chat]
+	if err := c.makeRequest(ctx, http.MethodGet, endpoint, params, &result); err != nil {
+		return nil, fmt.Errorf("getChat: %w", err)
+	}
+	if !result.Ok {
+		return nil, fmt.Errorf("telegram API error: %s", result.Description)
+	}
+
+	username := result.Result.Username
+	var avatarURL string
+	if username != "" {
+		avatarURL = fmt.Sprintf("https://t.me/i/userpic/160/%s.jpg", username)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodHead, avatarURL, nil)
+		resp, err := c.httpClient.Do(req)
+		if err == nil {
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				avatarURL = ""
+			}
+		}
+	}
+
+	return &PublicChannelInfo{
+		ID:       result.Result.ID,
+		Username: username,
+		ChannelURL: func() string {
+			if username == "" {
+				return ""
+			}
+			return fmt.Sprintf("https://t.me/%s", username)
+		}(),
+		AvatarURL: avatarURL,
+		Title:     result.Result.Title,
+	}, nil
+}
+
 func (c *Client) makeRequest(ctx context.Context, method, endpoint string, data url.Values, out any) error {
 	var req *http.Request
 	var err error
