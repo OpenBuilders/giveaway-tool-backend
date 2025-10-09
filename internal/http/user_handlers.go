@@ -29,7 +29,7 @@ func (h *UserHandlersFiber) RegisterFiber(r fiber.Router) {
 	r.Get("/users/me", h.getMe)
 	// r.Get("/users/:id", h.getUserByID)
 	// r.Delete("/users/:id", h.deleteUser)
-	r.Get("/users/:id/channels", h.listUserChannels)
+	r.Get("/users/me/channels", h.listUserChannels)
 }
 
 func (h *UserHandlersFiber) listUsers(c *fiber.Ctx) error {
@@ -145,14 +145,29 @@ func (h *UserHandlersFiber) getMe(c *fiber.Ctx) error {
 }
 
 func (h *UserHandlersFiber) listUserChannels(c *fiber.Ctx) error {
-	id, err := c.ParamsInt("id")
-	if err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid id"})
+	// Read user id from Telegram init-data middleware context
+	userIDVal := c.Locals(mw.UserIdCtxParam)
+	if userIDVal == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	var id int64
+	switch v := userIDVal.(type) {
+	case int64:
+		id = v
+	case int:
+		id = int64(v)
+	case string:
+		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
+			id = parsed
+		}
+	}
+	if id == 0 {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
 	}
 	if h.channels == nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "channels service not configured"})
 	}
-	items, err := h.channels.ListUserChannels(c.Context(), int64(id))
+	items, err := h.channels.ListUserChannels(c.Context(), id)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -151,4 +152,101 @@ func (c *Client) makeRequest(ctx context.Context, method, endpoint string, data 
 	defer resp.Body.Close()
 	dec := json.NewDecoder(resp.Body)
 	return dec.Decode(out)
+}
+
+// ChatMember minimal subset for membership checks
+type ChatMember struct {
+	Status string `json:"status"`
+}
+
+// CheckMembership verifies whether the user is a member/admin/creator of a chat
+// chatID can be numeric id (as string) or @username
+func (c *Client) CheckMembership(ctx context.Context, userID int64, chatID string) (bool, error) {
+	var numericChatID int64
+	if len(chatID) > 0 && chatID[0] == '@' {
+		ch, err := c.GetPublicChannelInfo(ctx, chatID)
+		if err != nil {
+			return false, fmt.Errorf("failed to get chat info: %w", err)
+		}
+		numericChatID = ch.ID
+	} else {
+		id, err := strconv.ParseInt(chatID, 10, 64)
+		if err != nil {
+			return false, fmt.Errorf("invalid chat ID format: %w", err)
+		}
+		numericChatID = id
+	}
+
+	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/getChatMember", c.token)
+	data := url.Values{
+		"chat_id": {fmt.Sprintf("%d", numericChatID)},
+		"user_id": {fmt.Sprintf("%d", userID)},
+	}
+
+	var response struct {
+		Ok     bool       `json:"ok"`
+		Error  string     `json:"error"`
+		Result ChatMember `json:"result"`
+	}
+
+	if err := c.makeRequest(ctx, http.MethodGet, endpoint, data, &response); err != nil {
+		return false, fmt.Errorf("failed to check membership: %w", err)
+	}
+
+	if !response.Ok {
+		if strings.Contains(response.Error, "Too Many Requests") {
+			return false, fmt.Errorf("rate limit exceeded")
+		}
+		return false, fmt.Errorf("telegram API error: %s", response.Error)
+	}
+
+	switch response.Result.Status {
+	case "creator", "administrator", "member", "restricted":
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+
+// CheckBoost checks whether the user has any active boosts in the chat.
+// chatID may be @username or numeric id as string.
+func (c *Client) CheckBoost(ctx context.Context, userID int64, chatID string) (bool, error) {
+	var numericChatID int64
+	if len(chatID) > 0 && chatID[0] == '@' {
+		ch, err := c.GetPublicChannelInfo(ctx, chatID)
+		if err != nil {
+			return false, fmt.Errorf("failed to get chat info: %w", err)
+		}
+		numericChatID = ch.ID
+	} else {
+		id, err := strconv.ParseInt(chatID, 10, 64)
+		if err != nil {
+			return false, fmt.Errorf("invalid chat ID format: %w", err)
+		}
+		numericChatID = id
+	}
+
+	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/getUserChatBoosts", c.token)
+	data := url.Values{
+		"chat_id": {fmt.Sprintf("%d", numericChatID)},
+		"user_id": {fmt.Sprintf("%d", userID)},
+	}
+
+	var response struct {
+		Ok     bool   `json:"ok"`
+		Error  string `json:"error"`
+		Result struct {
+			Boosts []any `json:"boosts"`
+		} `json:"result"`
+	}
+	if err := c.makeRequest(ctx, http.MethodGet, endpoint, data, &response); err != nil {
+		return false, fmt.Errorf("failed to check boost status: %w", err)
+	}
+	if !response.Ok {
+		if strings.Contains(response.Error, "Too Many Requests") {
+			return false, fmt.Errorf("rate limit exceeded")
+		}
+		return false, fmt.Errorf("telegram API error: %s", response.Error)
+	}
+	return len(response.Result.Boosts) > 0, nil
 }

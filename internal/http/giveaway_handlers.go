@@ -27,7 +27,10 @@ func (h *GiveawayHandlersFiber) RegisterFiber(r fiber.Router) {
 	r.Post("/giveaways", h.create)
 	r.Get("/giveaways/:id", h.getByID)
 	r.Get("/users/:creator_id/giveaways", h.listByCreator)
+	r.Get("/giveaways", h.listActive)
 	r.Get("/users/:creator_id/giveaways/finished", h.listFinishedByCreator)
+	// Current user convenience endpoints
+	r.Get("/giveaways/me/all", h.listMineAll)
 	r.Patch("/giveaways/:id/status", h.updateStatus)
 	r.Delete("/giveaways/:id", h.delete)
 	r.Post("/giveaways/:id/join", h.join)
@@ -241,4 +244,32 @@ func (h *GiveawayHandlersFiber) listPrizeTemplates(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(templates)
+}
+
+func (h *GiveawayHandlersFiber) listActive(c *fiber.Ctx) error {
+	limit := c.QueryInt("limit", 20)
+	offset := c.QueryInt("offset", 0)
+	minParticipants := c.QueryInt("min_participants", 0)
+	list, err := h.service.ListActive(c.Context(), limit, offset, minParticipants)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(list)
+}
+
+// listMineAll returns all giveaways created by the current user (any status).
+func (h *GiveawayHandlersFiber) listMineAll(c *fiber.Ctx) error {
+	// user id from Telegram init-data middleware
+	userIDAny := c.Locals(middleware.UserIdCtxParam)
+	userID, _ := userIDAny.(int64)
+	if userID == 0 {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	limit := c.QueryInt("limit", 100)
+	offset := c.QueryInt("offset", 0)
+	list, err := h.service.ListByCreator(c.Context(), userID, limit, offset)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(list)
 }
