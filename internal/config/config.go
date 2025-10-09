@@ -16,6 +16,8 @@ type Config struct {
 	// Telegram init-data validation settings
 	TelegramBotToken string // Bot token for first-party validation
 	InitDataTTL      int    // TTL in seconds for init-data expiration (0 to skip)
+	// Workers
+	GiveawayExpireIntervalSec int // background worker tick seconds
 }
 
 // Load reads environment variables into Config with sane defaults for local dev.
@@ -38,6 +40,13 @@ func Load() (*Config, error) {
 			cfg.InitDataTTL = ttl
 		} else {
 			return nil, fmt.Errorf("invalid INIT_DATA_TTL: %w", err)
+		}
+	}
+	if iv := getEnv("GIVEAWAY_EXPIRE_INTERVAL_SEC", "30"); iv != "" {
+		if n, err := strconv.Atoi(iv); err == nil {
+			cfg.GiveawayExpireIntervalSec = n
+		} else {
+			return nil, fmt.Errorf("invalid GIVEAWAY_EXPIRE_INTERVAL_SEC: %w", err)
 		}
 	}
 	return cfg, nil

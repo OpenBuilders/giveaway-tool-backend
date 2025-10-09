@@ -7,15 +7,13 @@ import (
 	"github.com/gofiber/fiber/v2"
 
 	domain "github.com/your-org/giveaway-backend/internal/domain/user"
-	"github.com/your-org/giveaway-backend/internal/service"
+	usersvc "github.com/your-org/giveaway-backend/internal/service/user"
 )
 
 // UserHandlersFiber wires Fiber endpoints to the UserService.
-type UserHandlersFiber struct {
-	service *service.UserService
-}
+type UserHandlersFiber struct{ service *usersvc.Service }
 
-func NewUserHandlersFiber(svc *service.UserService) *UserHandlersFiber {
+func NewUserHandlersFiber(svc *usersvc.Service) *UserHandlersFiber {
 	return &UserHandlersFiber{service: svc}
 }
 
