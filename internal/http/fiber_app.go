@@ -13,6 +13,7 @@ import (
 	pgrepo "github.com/your-org/giveaway-backend/internal/repository/postgres"
 	"github.com/your-org/giveaway-backend/internal/service/channels"
 	gsvc "github.com/your-org/giveaway-backend/internal/service/giveaway"
+	"github.com/your-org/giveaway-backend/internal/service/telegram"
 	usersvc "github.com/your-org/giveaway-backend/internal/service/user"
 )
 
@@ -42,6 +43,11 @@ func NewFiberApp(pg *sql.DB, rdb *redisp.Client, cfg *config.Config) *fiber.App 
 	api := app.Group("/api", mw.InitDataMiddleware(cfg.TelegramBotToken, ttl))
 	uh.RegisterFiber(api)
 	gh.RegisterFiber(api)
+
+	// Telegram channels endpoints (public; no init-data required)
+	tg := telegram.NewClientFromEnv()
+	ch := NewChannelHandlers(tg)
+	ch.RegisterFiber(app.Group("/api"))
 
 	return app
 }
