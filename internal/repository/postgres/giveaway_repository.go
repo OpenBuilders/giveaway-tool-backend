@@ -454,3 +454,44 @@ func (r *GiveawayRepository) ListFinishedByCreator(ctx context.Context, creatorI
 	}
 	return out, rows.Err()
 }
+
+// ListActive returns active giveaways with participants count, filtered by minParticipants and paginated.
+func (r *GiveawayRepository) ListActive(ctx context.Context, limit, offset, minParticipants int) ([]dg.Giveaway, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if minParticipants < 0 {
+		minParticipants = 0
+	}
+	const q = `
+        SELECT g.id, g.creator_id, g.title, g.description, g.started_at, g.ends_at,
+               g.duration, g.winners_count, g.status, g.created_at, g.updated_at,
+               COALESCE(pc.cnt,0) as participants_count
+        FROM giveaways g
+        LEFT JOIN (
+            SELECT giveaway_id, COUNT(*)::int AS cnt
+            FROM giveaway_participants
+            GROUP BY giveaway_id
+        ) pc ON pc.giveaway_id = g.id
+        WHERE g.status='active' AND COALESCE(pc.cnt,0) >= $3
+        ORDER BY pc.cnt DESC NULLS LAST, g.created_at DESC
+        LIMIT $1 OFFSET $2`
+	rows, err := r.db.QueryContext(ctx, q, limit, offset, minParticipants)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []dg.Giveaway
+	for rows.Next() {
+		var g dg.Giveaway
+		if err := rows.Scan(&g.ID, &g.CreatorID, &g.Title, &g.Description, &g.StartedAt, &g.EndsAt,
+			&g.Duration, &g.MaxWinnersCount, &g.Status, &g.CreatedAt, &g.UpdatedAt, &g.ParticipantsCount); err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}

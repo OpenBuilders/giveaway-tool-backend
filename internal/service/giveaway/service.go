@@ -264,3 +264,11 @@ func (s *Service) ListFinishedByCreator(ctx context.Context, creatorID int64, li
 	}
 	return s.repo.ListFinishedByCreator(ctx, creatorID, limit, offset)
 }
+
+// ListActive returns active giveaways with default minParticipants when zero.
+func (s *Service) ListActive(ctx context.Context, limit, offset, minParticipants int) ([]dg.Giveaway, error) {
+	if minParticipants == 0 {
+		minParticipants = 1
+	}
+	return s.repo.ListActive(ctx, limit, offset, minParticipants)
+}

@@ -21,6 +21,7 @@ func (h *GiveawayHandlersFiber) RegisterFiber(r fiber.Router) {
 	r.Post("/giveaways", h.create)
 	r.Get("/giveaways/:id", h.getByID)
 	r.Get("/users/:creator_id/giveaways", h.listByCreator)
+	r.Get("/giveaways", h.listActive)
 	r.Get("/users/:creator_id/giveaways/finished", h.listFinishedByCreator)
 	r.Patch("/giveaways/:id/status", h.updateStatus)
 	r.Delete("/giveaways/:id", h.delete)
@@ -135,6 +136,17 @@ func (h *GiveawayHandlersFiber) listFinishedByCreator(c *fiber.Ctx) error {
 	limit := c.QueryInt("limit", 100)
 	offset := c.QueryInt("offset", 0)
 	list, err := h.service.ListFinishedByCreator(c.Context(), int64(creatorID), limit, offset)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(list)
+}
+
+func (h *GiveawayHandlersFiber) listActive(c *fiber.Ctx) error {
+	limit := c.QueryInt("limit", 20)
+	offset := c.QueryInt("offset", 0)
+	minParticipants := c.QueryInt("min_participants", 1)
+	list, err := h.service.ListActive(c.Context(), limit, offset, minParticipants)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
