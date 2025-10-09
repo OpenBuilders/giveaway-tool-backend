@@ -3,19 +3,25 @@ package giveaway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	dg "github.com/your-org/giveaway-backend/internal/domain/giveaway"
 	repo "github.com/your-org/giveaway-backend/internal/repository/postgres"
+	tg "github.com/your-org/giveaway-backend/internal/service/telegram"
 )
 
 // Service contains business rules for giveaways.
 type Service struct {
 	repo *repo.GiveawayRepository
+	tg   *tg.Client
 }
 
 func NewService(r *repo.GiveawayRepository) *Service { return &Service{repo: r} }
+
+// WithTelegram injects a Telegram client for requirements checks and enrichment.
+func (s *Service) WithTelegram(client *tg.Client) *Service { s.tg = client; return s }
 
 // Create validates and persists a new giveaway.
 func (s *Service) Create(ctx context.Context, g *dg.Giveaway) (string, error) {
@@ -65,7 +71,43 @@ func (s *Service) GetByID(ctx context.Context, id string) (*dg.Giveaway, error) 
 	if id == "" {
 		return nil, errors.New("missing id")
 	}
-	return s.repo.GetByID(ctx, id)
+	g, err := s.repo.GetByID(ctx, id)
+	if err != nil || g == nil {
+		return g, err
+	}
+	// Enrich requirements with channel info via Telegram when possible (best-effort)
+	if s.tg != nil {
+		for i := range g.Requirements {
+			req := &g.Requirements[i]
+			if req.Type == dg.RequirementTypeSubscription {
+				// Prefer username if present, else resolve from ID by building @username via API
+				uname := req.ChannelUsername
+				if uname == "" && req.ChannelID != 0 {
+					// Telegram API requires @username for avatar URL; we can attempt info via ID not supported reliably
+					// Skip if no username
+				}
+				key := uname
+				if key == "" && req.ChannelID != 0 {
+					key = fmt.Sprintf("%d", req.ChannelID)
+				}
+				if key != "" {
+					info, err := s.tg.GetPublicChannelInfo(ctx, key)
+					if err == nil && info != nil {
+						req.ChannelTitle = info.Title
+						req.ChannelURL = info.ChannelURL
+						req.AvatarURL = info.AvatarURL
+						if req.ChannelID == 0 {
+							req.ChannelID = info.ID
+						}
+						if req.ChannelUsername == "" {
+							req.ChannelUsername = info.Username
+						}
+					}
+				}
+			}
+		}
+	}
+	return g, nil
 }
 
 // ListByCreator returns giveaways for the user.
@@ -134,6 +176,30 @@ func (s *Service) Join(ctx context.Context, id string, userID int64) error {
 	}
 	if g.Status != dg.GiveawayStatusActive {
 		return errors.New("join only allowed for active giveaways")
+	}
+	// Requirements check (TG errors treated as satisfied)
+	if s.tg != nil && len(g.Requirements) > 0 {
+		for _, req := range g.Requirements {
+			if req.Type == dg.RequirementTypeSubscription {
+				chat := ""
+				if req.ChannelID != 0 {
+					chat = fmt.Sprintf("%d", req.ChannelID)
+				} else if req.ChannelUsername != "" {
+					chat = "@" + req.ChannelUsername
+				}
+				if chat == "" {
+					continue
+				}
+				ok, err := s.tg.CheckMembership(ctx, userID, chat)
+				if err != nil {
+					// treat as satisfied on telegram error
+					continue
+				}
+				if !ok {
+					return errors.New("requirements not satisfied")
+				}
+			}
+		}
 	}
 	return s.repo.Join(ctx, id, userID)
 }

@@ -168,6 +168,28 @@ func (r *GiveawayRepository) GetByID(ctx context.Context, id string) (*dg.Giveaw
 			g.Winners = append(g.Winners, dg.Winner{Place: w.place, UserID: w.user, Prizes: prizemap[w.user]})
 		}
 	}
+
+	// Load requirements
+	rqrows, err := r.db.QueryContext(ctx, `SELECT type, channel_id, channel_username FROM giveaway_requirements WHERE giveaway_id=$1`, id)
+	if err == nil {
+		defer rqrows.Close()
+		for rqrows.Next() {
+			var t string
+			var cid sql.NullInt64
+			var uname sql.NullString
+			if err := rqrows.Scan(&t, &cid, &uname); err != nil {
+				return nil, err
+			}
+			req := dg.Requirement{Type: dg.RequirementType(t)}
+			if cid.Valid {
+				req.ChannelID = cid.Int64
+			}
+			if uname.Valid {
+				req.ChannelUsername = uname.String
+			}
+			g.Requirements = append(g.Requirements, req)
+		}
+	}
 	return &g, nil
 }
 

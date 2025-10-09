@@ -46,6 +46,7 @@ type Giveaway struct {
 	UpdatedAt         time.Time      `json:"updated_at"`
 	Prizes            []PrizePlace   `json:"prizes,omitempty"`
 	Sponsors          []ChannelInfo  `json:"sponsors"`
+	Requirements      []Requirement  `json:"requirements,omitempty"`
 	Winners           []Winner       `json:"winners,omitempty"`
 	ParticipantsCount int            `json:"participants_count"`
 }

@@ -43,7 +43,9 @@ func NewFiberApp(pg *sql.DB, rdb *redisp.Client, cfg *config.Config) *fiber.App 
 
 	// Giveaway domain deps
 	gRepo := pgrepo.NewGiveawayRepository(pg)
-	gs := gsvc.NewService(gRepo)
+	// Telegram client used below; initialize first
+	tgClient := telegram.NewClientFromEnv()
+	gs := gsvc.NewService(gRepo).WithTelegram(tgClient)
 	gh := NewGiveawayHandlersFiber(gs)
 
 	// API groups
@@ -54,9 +56,10 @@ func NewFiberApp(pg *sql.DB, rdb *redisp.Client, cfg *config.Config) *fiber.App 
 	gh.RegisterFiber(v1)
 
 	// Telegram channels endpoints (public; no init-data required)
-	tg := telegram.NewClientFromEnv()
-	ch := NewChannelHandlers(tg)
+	ch := NewChannelHandlers(tgClient)
 	ch.RegisterFiber(app.Group("/api", mw.RedisCache(rdb, 2*time.Second)))
+	rq := NewRequirementsHandlers()
+	rq.RegisterFiber(app.Group("/api", mw.RedisCache(rdb, 2*time.Second)))
 
 	return app
 }

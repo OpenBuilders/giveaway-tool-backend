@@ -12,6 +12,7 @@ func NewChannelHandlers(tgc *tg.Client) *ChannelHandlers { return &ChannelHandle
 
 func (h *ChannelHandlers) RegisterFiber(r fiber.Router) {
 	r.Get("/channels/:username/info", h.getChannelInfo)
+	r.Get("/channels/:chat/membership", h.checkMembership)
 }
 
 func (h *ChannelHandlers) getChannelInfo(c *fiber.Ctx) error {
@@ -21,4 +22,17 @@ func (h *ChannelHandlers) getChannelInfo(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(info)
+}
+
+func (h *ChannelHandlers) checkMembership(c *fiber.Ctx) error {
+	chat := c.Params("chat")
+	userID, err := c.QueryInt("user_id", 0), error(nil)
+	if userID == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing user_id"})
+	}
+	ok, err := h.tg.CheckMembership(c.Context(), int64(userID), chat)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"ok": ok})
 }
