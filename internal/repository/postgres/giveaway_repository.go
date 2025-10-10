@@ -305,7 +305,7 @@ func (r *GiveawayRepository) Join(ctx context.Context, id string, userID int64) 
 func (r *GiveawayRepository) FinishExpired(ctx context.Context) (int64, error) {
 	const q = `
         UPDATE giveaways
-        SET status='finished', updated_at=now()
+        SET status='completed', updated_at=now()
         WHERE ends_at <= now() AND status IN ('scheduled','active')`
 	res, err := r.db.ExecContext(ctx, q)
 	if err != nil {
@@ -477,7 +477,7 @@ func (r *GiveawayRepository) FinishOneWithDistribution(ctx context.Context, id s
 	}
 
 	// Mark giveaway finished
-	if _, err = tx.ExecContext(ctx, `UPDATE giveaways SET status='finished', updated_at=now() WHERE id=$1`, id); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE giveaways SET status='completed', updated_at=now() WHERE id=$1`, id); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -618,7 +618,7 @@ func (r *GiveawayRepository) FinishWithWinners(ctx context.Context, id string, w
 		}
 	}
 
-	if _, err = tx.ExecContext(ctx, `UPDATE giveaways SET status='finished', updated_at=now() WHERE id=$1`, id); err != nil {
+	if _, err = tx.ExecContext(ctx, `UPDATE giveaways SET status='completed', updated_at=now() WHERE id=$1`, id); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -635,7 +635,7 @@ func (r *GiveawayRepository) ListFinishedByCreator(ctx context.Context, creatorI
 	const q = `
         SELECT id, creator_id, title, description, started_at, ends_at, duration, winners_count, status, created_at, updated_at
         FROM giveaways
-        WHERE creator_id=$1 AND status='finished'
+        WHERE creator_id=$1 AND status='completed'
         ORDER BY ends_at DESC
         LIMIT $2 OFFSET $3`
 	rows, err := r.db.QueryContext(ctx, q, creatorID, limit, offset)

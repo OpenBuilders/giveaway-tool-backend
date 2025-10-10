@@ -8,8 +8,10 @@ type GiveawayStatus string
 const (
 	GiveawayStatusScheduled GiveawayStatus = "scheduled"
 	GiveawayStatusActive    GiveawayStatus = "active"
-	GiveawayStatusFinished  GiveawayStatus = "finished"
+	GiveawayStatusFinished  GiveawayStatus = "finished" // legacy value, kept for backward-compat in reads
+	GiveawayStatusCompleted GiveawayStatus = "completed"
 	GiveawayStatusCancelled GiveawayStatus = "cancelled"
+	GiveawayStatusPending   GiveawayStatus = "pending"
 )
 
 // PrizePlace describes a prize for a specific winning place.

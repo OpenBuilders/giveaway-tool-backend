@@ -128,7 +128,7 @@ func (s *Service) UpdateStatus(ctx context.Context, id string, status dg.Giveawa
 		return errors.New("missing id")
 	}
 	switch status {
-	case dg.GiveawayStatusScheduled, dg.GiveawayStatusActive, dg.GiveawayStatusFinished, dg.GiveawayStatusCancelled, "pending":
+	case dg.GiveawayStatusScheduled, dg.GiveawayStatusActive, dg.GiveawayStatusFinished, dg.GiveawayStatusCancelled, dg.GiveawayStatusPending, dg.GiveawayStatusCompleted:
 	default:
 		return errors.New("invalid status")
 	}
@@ -254,10 +254,10 @@ func (s *Service) FinishOneWithDistribution(ctx context.Context, id string) erro
 	if g == nil {
 		return errors.New("not found")
 	}
-	// If custom requirement exists, move to pending and return
+	// If custom requirement exists, move to pending and return (winners will be uploaded manually)
 	for _, req := range g.Requirements {
 		if req.Type == dg.RequirementTypeCustom {
-			return s.repo.UpdateStatus(ctx, id, "pending")
+			return s.repo.UpdateStatus(ctx, id, dg.GiveawayStatusPending)
 		}
 	}
 	winnersCount := g.MaxWinnersCount
