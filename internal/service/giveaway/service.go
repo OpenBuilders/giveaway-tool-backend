@@ -271,3 +271,25 @@ func (s *Service) ListFinishedByCreator(ctx context.Context, creatorID int64, li
 func (s *Service) ListActive(ctx context.Context, limit, offset, minParticipants int) ([]dg.Giveaway, error) {
 	return s.repo.ListActive(ctx, limit, offset, minParticipants)
 }
+
+// GetUserRole returns the role of a given user in a giveaway context.
+// owner | winner | participant | user
+func (s *Service) GetUserRole(ctx context.Context, g *dg.Giveaway, userID int64) (string, error) {
+	if g == nil || userID == 0 {
+		return "user", nil
+	}
+	if g.CreatorID == userID {
+		return "owner", nil
+	}
+	if ok, err := s.repo.IsWinner(ctx, g.ID, userID); err == nil && ok {
+		return "winner", nil
+	} else if err != nil {
+		return "user", err
+	}
+	if ok, err := s.repo.IsParticipant(ctx, g.ID, userID); err == nil && ok {
+		return "participant", nil
+	} else if err != nil {
+		return "user", err
+	}
+	return "user", nil
+}

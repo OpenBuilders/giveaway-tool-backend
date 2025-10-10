@@ -1,6 +1,7 @@
 package http
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -26,6 +27,7 @@ func NewGiveawayHandlersFiber(svc *gsvc.Service, chs *chsvc.Service, tg *tgsvc.C
 func (h *GiveawayHandlersFiber) RegisterFiber(r fiber.Router) {
 	r.Post("/giveaways", h.create)
 	r.Get("/giveaways/:id", h.getByID)
+	r.Get("/giveaways/:id/check-requirements", h.checkRequirements)
 	r.Get("/users/:creator_id/giveaways", h.listByCreator)
 	r.Get("/giveaways", h.listActive)
 	r.Get("/users/:creator_id/giveaways/finished", h.listFinishedByCreator)
@@ -49,14 +51,27 @@ type createSponsorReq struct {
 }
 
 type createGiveawayReq struct {
-	Title           string             `json:"title"`
-	Duration        int64              `json:"duration"`
-	WinnersCount    int                `json:"winners_count"`
-	Prizes          []createPrizeReq   `json:"prizes"`
-	Description     string             `json:"description,omitempty"`
-	MaxParticipants *int               `json:"max_participants,omitempty"`
-	Requirements    []interface{}      `json:"requirements,omitempty"`
-	Sponsors        []createSponsorReq `json:"sponsors,omitempty"`
+	Title           string                 `json:"title"`
+	Duration        int64                  `json:"duration"`
+	WinnersCount    int                    `json:"winners_count"`
+	Prizes          []createPrizeReq       `json:"prizes"`
+	Description     string                 `json:"description,omitempty"`
+	MaxParticipants *int                   `json:"max_participants,omitempty"`
+	Requirements    []createRequirementReq `json:"requirements,omitempty"`
+	Sponsors        []createSponsorReq     `json:"sponsors,omitempty"`
+}
+
+// createRequirementReq accepts flexible payloads from the client
+// and is normalized into domain.Requirement.
+type createRequirementReq struct {
+	Type dg.RequirementType `json:"type"`
+	// Client may send either "username" or "channel_username"
+	Username        string `json:"username,omitempty"`
+	ChannelUsername string `json:"channel_username,omitempty"`
+	ChannelID       int64  `json:"channel_id,omitempty"`
+	AvatarURL       string `json:"avatar_url,omitempty"`
+	Name            string `json:"name,omitempty"`
+	Description     string `json:"description,omitempty"`
 }
 
 // create handles creation of a new giveaway.
@@ -91,6 +106,66 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 		qty := p.Quantity
 		if qty <= 0 {
 			qty = 1
+		}
+
+		// Map and enrich requirements
+		for _, r := range req.Requirements {
+			switch r.Type {
+			case dg.RequirementTypeSubscription:
+				uname := r.ChannelUsername
+				if uname == "" {
+					uname = r.Username
+				}
+				// normalize without @ for storage; telegram client accepts with @
+				normalized := uname
+				if len(normalized) > 0 && normalized[0] == '@' {
+					normalized = normalized[1:]
+				}
+				reqEntry := dg.Requirement{Type: dg.RequirementTypeSubscription}
+				if r.Name != "" {
+					reqEntry.ChannelTitle = r.Name
+				}
+				if r.Description != "" {
+					reqEntry.Description = r.Description
+				}
+				// Try Telegram enrichment
+				if h.telegram != nil && normalized != "" {
+					if info, err := h.telegram.GetPublicChannelInfo(c.Context(), normalized); err == nil && info != nil {
+						reqEntry.ChannelID = info.ID
+						reqEntry.ChannelUsername = info.Username
+						reqEntry.ChannelTitle = info.Title
+						reqEntry.ChannelURL = info.ChannelURL
+						// prefer client-provided avatar if present
+						if r.AvatarURL != "" {
+							reqEntry.AvatarURL = r.AvatarURL
+						} else {
+							reqEntry.AvatarURL = info.AvatarURL
+						}
+					} else {
+						// fallback: store username only when API fails
+						reqEntry.ChannelUsername = normalized
+						if r.ChannelID != 0 {
+							reqEntry.ChannelID = r.ChannelID
+						}
+						if r.AvatarURL != "" {
+							reqEntry.AvatarURL = r.AvatarURL
+						}
+					}
+				} else {
+					// No telegram client: store what we have
+					reqEntry.ChannelUsername = normalized
+					if r.ChannelID != 0 {
+						reqEntry.ChannelID = r.ChannelID
+					}
+					if r.AvatarURL != "" {
+						reqEntry.AvatarURL = r.AvatarURL
+					}
+				}
+				g.Requirements = append(g.Requirements, reqEntry)
+			case dg.RequirementTypeBoost:
+				// For now, persist only known type; boost not stored in DB schema, but keep in model
+				g.Requirements = append(g.Requirements, dg.Requirement{Type: dg.RequirementTypeBoost})
+			}
 		}
 		g.Prizes = append(g.Prizes, dg.PrizePlace{
 			Place:       p.Place,
@@ -150,7 +225,53 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 	if g == nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "not found"})
 	}
-	return c.JSON(g)
+	// compute user role
+	var userRole string
+	if uidAny := c.Locals(middleware.UserIdCtxParam); uidAny != nil {
+		if uid, ok := uidAny.(int64); ok {
+			if role, err := h.service.GetUserRole(c.Context(), g, uid); err == nil {
+				userRole = role
+			}
+		}
+	}
+	// Build DTO without creator_id but with user_role
+	type GiveawayDTO struct {
+		ID                string            `json:"id"`
+		Title             string            `json:"title"`
+		Description       string            `json:"description"`
+		StartedAt         time.Time         `json:"started_at"`
+		EndsAt            time.Time         `json:"ends_at"`
+		Duration          int64             `json:"duration"`
+		MaxWinnersCount   int               `json:"winners_count"`
+		Status            dg.GiveawayStatus `json:"status"`
+		CreatedAt         time.Time         `json:"created_at"`
+		UpdatedAt         time.Time         `json:"updated_at"`
+		Prizes            []dg.PrizePlace   `json:"prizes,omitempty"`
+		Sponsors          []dg.ChannelInfo  `json:"sponsors"`
+		Requirements      []dg.Requirement  `json:"requirements,omitempty"`
+		Winners           []dg.Winner       `json:"winners,omitempty"`
+		ParticipantsCount int               `json:"participants_count"`
+		UserRole          string            `json:"user_role,omitempty"`
+	}
+	dto := GiveawayDTO{
+		ID:                g.ID,
+		Title:             g.Title,
+		Description:       g.Description,
+		StartedAt:         g.StartedAt,
+		EndsAt:            g.EndsAt,
+		Duration:          g.Duration,
+		MaxWinnersCount:   g.MaxWinnersCount,
+		Status:            g.Status,
+		CreatedAt:         g.CreatedAt,
+		UpdatedAt:         g.UpdatedAt,
+		Prizes:            g.Prizes,
+		Sponsors:          g.Sponsors,
+		Requirements:      g.Requirements,
+		Winners:           g.Winners,
+		ParticipantsCount: g.ParticipantsCount,
+		UserRole:          userRole,
+	}
+	return c.JSON(dto)
 }
 
 func (h *GiveawayHandlersFiber) listByCreator(c *fiber.Ctx) error {
@@ -272,4 +393,147 @@ func (h *GiveawayHandlersFiber) listMineAll(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.JSON(list)
+}
+
+// checkRequirements verifies whether the current user satisfies each requirement of a giveaway.
+// Returns detailed results and overall all_met flag.
+func (h *GiveawayHandlersFiber) checkRequirements(c *fiber.Ctx) error {
+	if h.telegram == nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "telegram client not configured"})
+	}
+	// Current user from Telegram init-data
+	userIDAny := c.Locals(middleware.UserIdCtxParam)
+	userID, _ := userIDAny.(int64)
+	if userID == 0 {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	id := c.Params("id")
+	g, err := h.service.GetByID(c.Context(), id)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	if g == nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "not found"})
+	}
+
+	type chatInfo struct {
+		Title     string `json:"title"`
+		Username  string `json:"username"`
+		Type      string `json:"type"`
+		AvatarURL string `json:"avatar_url"`
+	}
+	type item struct {
+		Name     string             `json:"name"`
+		Type     dg.RequirementType `json:"type"`
+		Username string             `json:"username"`
+		Status   string             `json:"status"`
+		Error    string             `json:"error,omitempty"`
+		Link     string             `json:"link,omitempty"`
+		ChatInfo chatInfo           `json:"chat_info"`
+	}
+
+	results := make([]item, 0, len(g.Requirements))
+	allMet := true
+
+	for _, rqm := range g.Requirements {
+		it := item{
+			Name:     rqm.ChannelTitle,
+			Type:     rqm.Type,
+			Username: rqm.ChannelUsername,
+			Status:   "failed",
+			ChatInfo: chatInfo{Title: rqm.ChannelTitle, Username: rqm.ChannelUsername, AvatarURL: rqm.AvatarURL},
+		}
+		if rqm.ChannelUsername != "" {
+			it.Link = "https://t.me/" + rqm.ChannelUsername
+		}
+		// Best-effort chat info enrichment (type, avatar/title fallback)
+		// Prefer username; fallback to id
+		if h.telegram != nil {
+			var info *tgsvc.PublicChannelInfo
+			if rqm.ChannelUsername != "" {
+				if inf, e := h.telegram.GetPublicChannelInfo(c.Context(), rqm.ChannelUsername); e == nil {
+					info = inf
+				}
+			} else if rqm.ChannelID != 0 {
+				if inf, e := h.telegram.GetPublicChannelInfoByID(c.Context(), rqm.ChannelID); e == nil {
+					info = inf
+				}
+			}
+			if info != nil {
+				it.ChatInfo.Type = info.Type
+				if it.ChatInfo.Title == "" {
+					it.ChatInfo.Title = info.Title
+				}
+				if it.ChatInfo.Username == "" {
+					it.ChatInfo.Username = info.Username
+				}
+				if it.ChatInfo.AvatarURL == "" {
+					it.ChatInfo.AvatarURL = info.AvatarURL
+				}
+			}
+		}
+
+		// Perform requirement check
+		switch rqm.Type {
+		case dg.RequirementTypeSubscription:
+			chat := ""
+			if rqm.ChannelID != 0 {
+				chat = fmt.Sprintf("%d", rqm.ChannelID)
+			} else if rqm.ChannelUsername != "" {
+				chat = "@" + rqm.ChannelUsername
+			}
+			if chat == "" {
+				it.Error = "invalid requirement: no channel"
+				results = append(results, it)
+				allMet = false
+				continue
+			}
+			ok, e := h.telegram.CheckMembership(c.Context(), userID, chat)
+			if e != nil {
+				it.Error = e.Error()
+				allMet = false
+			} else if ok {
+				it.Status = "success"
+			} else {
+				allMet = false
+			}
+		case dg.RequirementTypeBoost:
+			chat := ""
+			if rqm.ChannelID != 0 {
+				chat = fmt.Sprintf("%d", rqm.ChannelID)
+			} else if rqm.ChannelUsername != "" {
+				chat = "@" + rqm.ChannelUsername
+			}
+			if chat == "" {
+				it.Error = "invalid requirement: no channel"
+				results = append(results, it)
+				allMet = false
+				continue
+			}
+			ok, e := h.telegram.CheckBoost(c.Context(), userID, chat)
+			if e != nil {
+				it.Error = e.Error()
+				allMet = false
+			} else if ok {
+				it.Status = "success"
+			} else {
+				allMet = false
+			}
+		case dg.RequirementTypeCustom:
+			// Custom requirements cannot be verified automatically; treat as success
+			it.Status = "success"
+		default:
+			it.Error = "unsupported requirement type"
+			allMet = false
+		}
+
+		results = append(results, it)
+	}
+
+	return c.JSON(fiber.Map{
+		"giveaway_id": id,
+		"results":     results,
+		"all_met":     allMet,
+	})
 }

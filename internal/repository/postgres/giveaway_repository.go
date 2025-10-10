@@ -61,6 +61,22 @@ func (r *GiveawayRepository) Create(ctx context.Context, g *dg.Giveaway) error {
 		}
 	}
 
+	// Requirements
+	if len(g.Requirements) > 0 {
+		const qReq = `INSERT INTO giveaway_requirements (giveaway_id, type, channel_id, channel_username, name, description) VALUES ($1,$2,$3,$4,$5,$6)`
+		for _, rqm := range g.Requirements {
+			var cid interface{}
+			if rqm.ChannelID != 0 {
+				cid = rqm.ChannelID
+			} else {
+				cid = nil
+			}
+			if _, err = tx.ExecContext(ctx, qReq, g.ID, string(rqm.Type), cid, rqm.ChannelUsername, rqm.ChannelTitle, rqm.Description); err != nil {
+				return err
+			}
+		}
+	}
+
 	return tx.Commit()
 }
 
@@ -170,14 +186,16 @@ func (r *GiveawayRepository) GetByID(ctx context.Context, id string) (*dg.Giveaw
 	}
 
 	// Load requirements
-	rqrows, err := r.db.QueryContext(ctx, `SELECT type, channel_id, channel_username FROM giveaway_requirements WHERE giveaway_id=$1`, id)
+	rqrows, err := r.db.QueryContext(ctx, `SELECT type, channel_id, channel_username, name, description FROM giveaway_requirements WHERE giveaway_id=$1`, id)
 	if err == nil {
 		defer rqrows.Close()
 		for rqrows.Next() {
 			var t string
 			var cid sql.NullInt64
 			var uname sql.NullString
-			if err := rqrows.Scan(&t, &cid, &uname); err != nil {
+			var name sql.NullString
+			var desc sql.NullString
+			if err := rqrows.Scan(&t, &cid, &uname, &name, &desc); err != nil {
 				return nil, err
 			}
 			req := dg.Requirement{Type: dg.RequirementType(t)}
@@ -186,6 +204,12 @@ func (r *GiveawayRepository) GetByID(ctx context.Context, id string) (*dg.Giveaw
 			}
 			if uname.Valid {
 				req.ChannelUsername = uname.String
+			}
+			if name.Valid {
+				req.ChannelTitle = name.String
+			}
+			if desc.Valid {
+				req.Description = desc.String
 			}
 			g.Requirements = append(g.Requirements, req)
 		}
@@ -423,6 +447,34 @@ func (r *GiveawayRepository) FinishOneWithDistribution(ctx context.Context, id s
 		return err
 	}
 	return tx.Commit()
+}
+
+// IsParticipant returns true if the user participated in the giveaway.
+func (r *GiveawayRepository) IsParticipant(ctx context.Context, id string, userID int64) (bool, error) {
+	const q = `SELECT 1 FROM giveaway_participants WHERE giveaway_id=$1 AND user_id=$2 LIMIT 1`
+	var one int
+	err := r.db.QueryRowContext(ctx, q, id, userID).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// IsWinner returns true if the user is among winners of the giveaway.
+func (r *GiveawayRepository) IsWinner(ctx context.Context, id string, userID int64) (bool, error) {
+	const q = `SELECT 1 FROM giveaway_winners WHERE giveaway_id=$1 AND user_id=$2 LIMIT 1`
+	var one int
+	err := r.db.QueryRowContext(ctx, q, id, userID).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // ListFinishedByCreator returns finished giveaways for the creator.
