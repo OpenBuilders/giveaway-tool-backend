@@ -104,58 +104,41 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 		}
 	}
 
-	// Map prizes
-	for _, p := range req.Prizes {
-		qty := p.Quantity
-		if qty <= 0 {
-			qty = 1
-		}
-
-		// Map and enrich requirements
-		for _, r := range req.Requirements {
-			switch r.Type {
-			case dg.RequirementTypeSubscription:
-				uname := r.ChannelUsername
-				if uname == "" {
-					uname = r.Username
-				}
-				// normalize without @ for storage; telegram client accepts with @
-				normalized := uname
-				if len(normalized) > 0 && normalized[0] == '@' {
-					normalized = normalized[1:]
-				}
-				reqEntry := dg.Requirement{Type: dg.RequirementTypeSubscription}
-				if r.Name != "" {
-					reqEntry.ChannelTitle = r.Name
-				}
-				if r.Description != "" {
-					reqEntry.Description = r.Description
-				}
-				// Try Telegram enrichment
-				if h.telegram != nil && normalized != "" {
-					if info, err := h.telegram.GetPublicChannelInfo(c.Context(), normalized); err == nil && info != nil {
-						reqEntry.ChannelID = info.ID
-						reqEntry.ChannelUsername = info.Username
-						reqEntry.ChannelTitle = info.Title
-						reqEntry.ChannelURL = info.ChannelURL
-						// prefer client-provided avatar if present
-						if r.AvatarURL != "" {
-							reqEntry.AvatarURL = r.AvatarURL
-						} else {
-							reqEntry.AvatarURL = info.AvatarURL
-						}
+	// Map and enrich requirements first (independent of prizes)
+	for _, r := range req.Requirements {
+		switch r.Type {
+		case dg.RequirementTypeSubscription:
+			uname := r.ChannelUsername
+			if uname == "" {
+				uname = r.Username
+			}
+			// normalize without @ for storage; telegram client accepts with @
+			normalized := uname
+			if len(normalized) > 0 && normalized[0] == '@' {
+				normalized = normalized[1:]
+			}
+			reqEntry := dg.Requirement{Type: dg.RequirementTypeSubscription}
+			if r.Name != "" {
+				reqEntry.ChannelTitle = r.Name
+			}
+			if r.Description != "" {
+				reqEntry.Description = r.Description
+			}
+			// Try Telegram enrichment
+			if h.telegram != nil && normalized != "" {
+				if info, err := h.telegram.GetPublicChannelInfo(c.Context(), normalized); err == nil && info != nil {
+					reqEntry.ChannelID = info.ID
+					reqEntry.ChannelUsername = info.Username
+					reqEntry.ChannelTitle = info.Title
+					reqEntry.ChannelURL = info.ChannelURL
+					// prefer client-provided avatar if present
+					if r.AvatarURL != "" {
+						reqEntry.AvatarURL = r.AvatarURL
 					} else {
-						// fallback: store username only when API fails
-						reqEntry.ChannelUsername = normalized
-						if r.ChannelID != 0 {
-							reqEntry.ChannelID = r.ChannelID
-						}
-						if r.AvatarURL != "" {
-							reqEntry.AvatarURL = r.AvatarURL
-						}
+						reqEntry.AvatarURL = info.AvatarURL
 					}
 				} else {
-					// No telegram client: store what we have
+					// fallback: store username only when API fails
 					reqEntry.ChannelUsername = normalized
 					if r.ChannelID != 0 {
 						reqEntry.ChannelID = r.ChannelID
@@ -164,11 +147,29 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 						reqEntry.AvatarURL = r.AvatarURL
 					}
 				}
-				g.Requirements = append(g.Requirements, reqEntry)
-			case dg.RequirementTypeBoost:
-				// For now, persist only known type; boost not stored in DB schema, but keep in model
-				g.Requirements = append(g.Requirements, dg.Requirement{Type: dg.RequirementTypeBoost})
+			} else {
+				// No telegram client: store what we have
+				reqEntry.ChannelUsername = normalized
+				if r.ChannelID != 0 {
+					reqEntry.ChannelID = r.ChannelID
+				}
+				if r.AvatarURL != "" {
+					reqEntry.AvatarURL = r.AvatarURL
+				}
 			}
+			g.Requirements = append(g.Requirements, reqEntry)
+		case dg.RequirementTypeBoost:
+			g.Requirements = append(g.Requirements, dg.Requirement{Type: dg.RequirementTypeBoost, Description: r.Description})
+		case dg.RequirementTypeCustom:
+			g.Requirements = append(g.Requirements, dg.Requirement{Type: dg.RequirementTypeCustom, ChannelTitle: r.Name, Description: r.Description})
+		}
+	}
+
+	// Map prizes
+	for _, p := range req.Prizes {
+		qty := p.Quantity
+		if qty <= 0 {
+			qty = 1
 		}
 		g.Prizes = append(g.Prizes, dg.PrizePlace{
 			Place:       p.Place,

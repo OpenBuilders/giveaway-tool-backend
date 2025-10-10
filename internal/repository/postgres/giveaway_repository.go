@@ -185,17 +185,17 @@ func (r *GiveawayRepository) GetByID(ctx context.Context, id string) (*dg.Giveaw
 		}
 	}
 
-	// Load requirements
-	rqrows, err := r.db.QueryContext(ctx, `SELECT type, channel_id, channel_username, title, description FROM giveaway_requirements WHERE giveaway_id=$1`, id)
+	// Load requirements (support older schema without name/description)
+	rqrows, err := r.db.QueryContext(ctx, `SELECT type, channel_id, channel_username, name, description FROM giveaway_requirements WHERE giveaway_id=$1`, id)
 	if err == nil {
 		defer rqrows.Close()
 		for rqrows.Next() {
 			var t string
 			var cid sql.NullInt64
 			var uname sql.NullString
-			var title sql.NullString
+			var name sql.NullString
 			var desc sql.NullString
-			if err := rqrows.Scan(&t, &cid, &uname, &title, &desc); err != nil {
+			if err := rqrows.Scan(&t, &cid, &uname, &name, &desc); err != nil {
 				return nil, err
 			}
 			req := dg.Requirement{Type: dg.RequirementType(t)}
@@ -205,13 +205,35 @@ func (r *GiveawayRepository) GetByID(ctx context.Context, id string) (*dg.Giveaw
 			if uname.Valid {
 				req.ChannelUsername = uname.String
 			}
-			if title.Valid {
-				req.Title = title.String
+			if name.Valid {
+				req.ChannelTitle = name.String
 			}
 			if desc.Valid {
 				req.Description = desc.String
 			}
 			g.Requirements = append(g.Requirements, req)
+		}
+	} else {
+		// Fallback for old schema (no name/description columns)
+		rqrows2, err2 := r.db.QueryContext(ctx, `SELECT type, channel_id, channel_username FROM giveaway_requirements WHERE giveaway_id=$1`, id)
+		if err2 == nil {
+			defer rqrows2.Close()
+			for rqrows2.Next() {
+				var t string
+				var cid sql.NullInt64
+				var uname sql.NullString
+				if err := rqrows2.Scan(&t, &cid, &uname); err != nil {
+					return nil, err
+				}
+				req := dg.Requirement{Type: dg.RequirementType(t)}
+				if cid.Valid {
+					req.ChannelID = cid.Int64
+				}
+				if uname.Valid {
+					req.ChannelUsername = uname.String
+				}
+				g.Requirements = append(g.Requirements, req)
+			}
 		}
 	}
 	return &g, nil
