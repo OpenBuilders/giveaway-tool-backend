@@ -6,6 +6,7 @@ type RequirementType string
 const (
 	RequirementTypeSubscription RequirementType = "subscription"
 	RequirementTypeBoost        RequirementType = "boost"
+	RequirementTypeCustom       RequirementType = "custom"
 )
 
 // Requirement describes a single requirement entry for a giveaway.
@@ -17,4 +18,6 @@ type Requirement struct {
 	ChannelTitle    string          `json:"channel_title,omitempty"`
 	ChannelURL      string          `json:"channel_url,omitempty"`
 	AvatarURL       string          `json:"avatar_url,omitempty"`
+	Title           string          `json:"title,omitempty"`
+	Description     string          `json:"description,omitempty"`
 }

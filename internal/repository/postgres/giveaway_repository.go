@@ -170,14 +170,16 @@ func (r *GiveawayRepository) GetByID(ctx context.Context, id string) (*dg.Giveaw
 	}
 
 	// Load requirements
-	rqrows, err := r.db.QueryContext(ctx, `SELECT type, channel_id, channel_username FROM giveaway_requirements WHERE giveaway_id=$1`, id)
+	rqrows, err := r.db.QueryContext(ctx, `SELECT type, channel_id, channel_username, title, description FROM giveaway_requirements WHERE giveaway_id=$1`, id)
 	if err == nil {
 		defer rqrows.Close()
 		for rqrows.Next() {
 			var t string
 			var cid sql.NullInt64
 			var uname sql.NullString
-			if err := rqrows.Scan(&t, &cid, &uname); err != nil {
+			var title sql.NullString
+			var desc sql.NullString
+			if err := rqrows.Scan(&t, &cid, &uname, &title, &desc); err != nil {
 				return nil, err
 			}
 			req := dg.Requirement{Type: dg.RequirementType(t)}
@@ -186,6 +188,12 @@ func (r *GiveawayRepository) GetByID(ctx context.Context, id string) (*dg.Giveaw
 			}
 			if uname.Valid {
 				req.ChannelUsername = uname.String
+			}
+			if title.Valid {
+				req.Title = title.String
+			}
+			if desc.Valid {
+				req.Description = desc.String
 			}
 			g.Requirements = append(g.Requirements, req)
 		}
@@ -301,12 +309,24 @@ func (r *GiveawayRepository) FinishOneWithDistribution(ctx context.Context, id s
 		}
 	}()
 
-	// Lock giveaway row to prevent concurrent finishing
+	// Lock giveaway row to prevent concurrent finishing and prefetch requirements presence
 	var status string
 	if err = tx.QueryRowContext(ctx, `SELECT status FROM giveaways WHERE id=$1 FOR UPDATE`, id).Scan(&status); err != nil {
 		return err
 	}
 	if status == "finished" {
+		return tx.Commit()
+	}
+
+	// If custom requirement exists -> set pending and exit
+	var hasCustom bool
+	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM giveaway_requirements WHERE giveaway_id=$1 AND type='custom')`, id).Scan(&hasCustom); err != nil {
+		return err
+	}
+	if hasCustom {
+		if _, err = tx.ExecContext(ctx, `UPDATE giveaways SET status='pending', updated_at=now() WHERE id=$1`, id); err != nil {
+			return err
+		}
 		return tx.Commit()
 	}
 
@@ -419,6 +439,119 @@ func (r *GiveawayRepository) FinishOneWithDistribution(ctx context.Context, id s
 	}
 
 	// Mark giveaway finished
+	if _, err = tx.ExecContext(ctx, `UPDATE giveaways SET status='finished', updated_at=now() WHERE id=$1`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// FinishWithWinners finalizes a giveaway using the provided winners list (ordered by place).
+// It assigns fixed and loose prizes similarly to FinishOneWithDistribution.
+func (r *GiveawayRepository) FinishWithWinners(ctx context.Context, id string, winners []int64) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	// Lock and check status
+	var status string
+	if err = tx.QueryRowContext(ctx, `SELECT status FROM giveaways WHERE id=$1 FOR UPDATE`, id).Scan(&status); err != nil {
+		return err
+	}
+	if status == "finished" {
+		return tx.Commit()
+	}
+
+	winnersCount := len(winners)
+	if winnersCount == 0 {
+		return tx.Commit()
+	}
+
+	// Persist winners per place
+	for place := 1; place <= winnersCount; place++ {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winners (giveaway_id, place, user_id) VALUES ($1,$2,$3)`, id, place, winners[place-1]); err != nil {
+			return err
+		}
+	}
+
+	// Load prizes
+	pRows, err := tx.QueryContext(ctx, `SELECT place, title, description, quantity FROM giveaway_prizes WHERE giveaway_id=$1`, id)
+	if err != nil {
+		return err
+	}
+	type prize struct {
+		place       sql.NullInt64
+		title, desc string
+		qty         int
+	}
+	var fixed = map[int][]prize{}
+	var loose []prize
+	for pRows.Next() {
+		var pr prize
+		if err := pRows.Scan(&pr.place, &pr.title, &pr.desc, &pr.qty); err != nil {
+			pRows.Close()
+			return err
+		}
+		if pr.qty <= 0 {
+			pr.qty = 1
+		}
+		if pr.place.Valid {
+			fixed[int(pr.place.Int64)] = append(fixed[int(pr.place.Int64)], pr)
+		} else {
+			loose = append(loose, pr)
+		}
+	}
+	pRows.Close()
+
+	// Apply fixed prizes
+	for place, list := range fixed {
+		if place <= 0 || place > winnersCount {
+			continue
+		}
+		uid := winners[place-1]
+		for _, pr := range list {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, uid, pr.title, pr.desc); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Winners without fixed
+	without := make([]int64, 0, winnersCount)
+	for place := 1; place <= winnersCount; place++ {
+		if len(fixed[place]) == 0 {
+			without = append(without, winners[place-1])
+		}
+	}
+	if len(without) > 1 {
+		rand.Shuffle(len(without), func(i, j int) { without[i], without[j] = without[j], without[i] })
+	}
+
+	// Distribute loose prizes
+	idx := 0
+	for _, pr := range loose {
+		remaining := pr.qty
+		for i := 0; i < len(without) && remaining > 0; i++ {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, without[i], pr.title, pr.desc); err != nil {
+				return err
+			}
+			remaining--
+		}
+		for remaining > 0 && winnersCount > 0 {
+			uid := winners[idx%winnersCount]
+			if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, uid, pr.title, pr.desc); err != nil {
+				return err
+			}
+			remaining--
+			idx++
+		}
+	}
+
 	if _, err = tx.ExecContext(ctx, `UPDATE giveaways SET status='finished', updated_at=now() WHERE id=$1`, id); err != nil {
 		return err
 	}

@@ -1,6 +1,8 @@
 package http
 
 import (
+	"io"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -34,6 +36,7 @@ func (h *GiveawayHandlersFiber) RegisterFiber(r fiber.Router) {
 	r.Patch("/giveaways/:id/status", h.updateStatus)
 	r.Delete("/giveaways/:id", h.delete)
 	r.Post("/giveaways/:id/join", h.join)
+	r.Post("/giveaways/:id/manual-candidates", h.uploadManualCandidates)
 	r.Get("/prizes/templates", h.listPrizeTemplates)
 }
 
@@ -215,6 +218,40 @@ func (h *GiveawayHandlersFiber) join(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	return c.SendStatus(fiber.StatusNoContent)
+}
+
+func (h *GiveawayHandlersFiber) uploadManualCandidates(c *fiber.Ctx) error {
+	id := c.Params("id")
+	requesterAny := c.Locals(middleware.UserIdCtxParam)
+	creatorID, _ := requesterAny.(int64)
+	if creatorID == 0 {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	var content []byte
+	if file, err := c.FormFile("file"); err == nil && file != nil {
+		f, err := file.Open()
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		}
+		defer f.Close()
+		b, err := io.ReadAll(f)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		}
+		content = b
+	} else {
+		content = c.Body()
+	}
+	tokens := strings.Fields(string(content))
+	if len(tokens) == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "no candidates"})
+	}
+	accepted, selected, err := h.service.FinalizePendingWithCandidates(c.Context(), id, creatorID, tokens)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{"accepted": accepted, "selected": selected, "status": "finished"})
 }
 
 func (h *GiveawayHandlersFiber) listFinishedByCreator(c *fiber.Ctx) error {

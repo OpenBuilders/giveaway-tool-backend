@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -126,7 +128,7 @@ func (s *Service) UpdateStatus(ctx context.Context, id string, status dg.Giveawa
 		return errors.New("missing id")
 	}
 	switch status {
-	case dg.GiveawayStatusScheduled, dg.GiveawayStatusActive, dg.GiveawayStatusFinished, dg.GiveawayStatusCancelled:
+	case dg.GiveawayStatusScheduled, dg.GiveawayStatusActive, dg.GiveawayStatusFinished, dg.GiveawayStatusCancelled, "pending":
 	default:
 		return errors.New("invalid status")
 	}
@@ -252,11 +254,131 @@ func (s *Service) FinishOneWithDistribution(ctx context.Context, id string) erro
 	if g == nil {
 		return errors.New("not found")
 	}
+	// If custom requirement exists, move to pending and return
+	for _, req := range g.Requirements {
+		if req.Type == dg.RequirementTypeCustom {
+			return s.repo.UpdateStatus(ctx, id, "pending")
+		}
+	}
 	winnersCount := g.MaxWinnersCount
 	if winnersCount <= 0 {
 		winnersCount = 1
 	}
 	return s.repo.FinishOneWithDistribution(ctx, id, winnersCount)
+}
+
+// FinalizePendingWithCandidates filters provided candidates by non-custom requirements and finalizes giveaway.
+func (s *Service) FinalizePendingWithCandidates(ctx context.Context, id string, requesterID int64, candidates []string) (int, int, error) {
+	if id == "" {
+		return 0, 0, errors.New("missing id")
+	}
+	if requesterID == 0 {
+		return 0, 0, errors.New("unauthorized")
+	}
+	g, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return 0, 0, err
+	}
+	if g == nil {
+		return 0, 0, errors.New("not found")
+	}
+	if g.CreatorID != requesterID {
+		return 0, 0, errors.New("forbidden")
+	}
+	if string(g.Status) != "pending" {
+		return 0, 0, errors.New("not pending")
+	}
+
+	// Parse candidates into numeric IDs, resolve @username using Telegram if needed (best-effort)
+	unique := make(map[int64]struct{})
+	accepted := 0
+	for _, v := range candidates {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		var uid int64
+		if strings.HasPrefix(v, "@") {
+			if s.tg != nil {
+				if info, err := s.tg.GetPublicChannelInfo(ctx, v); err == nil && info != nil {
+					// Not a user; skip as we expect user IDs/usernames. In a real impl we might resolve user IDs elsewhere.
+					continue
+				}
+			}
+			continue
+		} else {
+			if idnum, err := strconv.ParseInt(v, 10, 64); err == nil {
+				uid = idnum
+			} else {
+				continue
+			}
+		}
+		if _, ok := unique[uid]; !ok {
+			unique[uid] = struct{}{}
+			accepted++
+		}
+	}
+
+	// Filter by non-custom requirements (subscription/boost); TG errors tolerated
+	winners := make([]int64, 0, g.MaxWinnersCount)
+	for uid := range unique {
+		satisfies := true
+		if s.tg != nil {
+			for _, req := range g.Requirements {
+				switch req.Type {
+				case dg.RequirementTypeSubscription:
+					chat := ""
+					if req.ChannelID != 0 {
+						chat = fmt.Sprintf("%d", req.ChannelID)
+					} else if req.ChannelUsername != "" {
+						chat = "@" + req.ChannelUsername
+					}
+					if chat == "" {
+						continue
+					}
+					ok, err := s.tg.CheckMembership(ctx, uid, chat)
+					if err != nil {
+						continue
+					}
+					if !ok {
+						satisfies = false
+					}
+				case dg.RequirementTypeBoost:
+					chat := ""
+					if req.ChannelID != 0 {
+						chat = fmt.Sprintf("%d", req.ChannelID)
+					} else if req.ChannelUsername != "" {
+						chat = "@" + req.ChannelUsername
+					}
+					if chat == "" {
+						continue
+					}
+					ok, err := s.tg.CheckBoost(ctx, uid, chat)
+					if err != nil {
+						continue
+					}
+					if !ok {
+						satisfies = false
+					}
+				}
+				if !satisfies {
+					break
+				}
+			}
+		}
+		if satisfies {
+			winners = append(winners, uid)
+		}
+	}
+
+	// Trim to winners_count
+	if len(winners) > g.MaxWinnersCount {
+		winners = winners[:g.MaxWinnersCount]
+	}
+	if err := s.repo.FinishWithWinners(ctx, id, winners); err != nil {
+		return accepted, len(winners), err
+	}
+	return accepted, len(winners), nil
 }
 
 // ListFinishedByCreator returns finished giveaways of a user.
