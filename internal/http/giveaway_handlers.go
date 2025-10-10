@@ -239,6 +239,14 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 		}
 	}
 	// Build DTO without creator_id but with user_role
+	type requirementDTO struct {
+		Name        string             `json:"name,omitempty"`
+		Type        dg.RequirementType `json:"type"`
+		Username    string             `json:"username,omitempty"`
+		AvatarURL   string             `json:"avatar_url,omitempty"`
+		Description string             `json:"description,omitempty"`
+	}
+
 	type GiveawayDTO struct {
 		ID                string            `json:"id"`
 		Title             string            `json:"title"`
@@ -252,11 +260,27 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 		UpdatedAt         time.Time         `json:"updated_at"`
 		Prizes            []dg.PrizePlace   `json:"prizes,omitempty"`
 		Sponsors          []dg.ChannelInfo  `json:"sponsors"`
-		Requirements      []dg.Requirement  `json:"requirements,omitempty"`
+		Requirements      []requirementDTO  `json:"requirements,omitempty"`
 		Winners           []dg.Winner       `json:"winners,omitempty"`
 		ParticipantsCount int               `json:"participants_count"`
 		UserRole          string            `json:"user_role,omitempty"`
 	}
+	// Map requirements to requested API shape
+	reqs := make([]requirementDTO, 0, len(g.Requirements))
+	for _, r := range g.Requirements {
+		name := r.ChannelTitle
+		if name == "" {
+			name = r.Title
+		}
+		reqs = append(reqs, requirementDTO{
+			Name:        name,
+			Type:        r.Type,
+			Username:    r.ChannelUsername,
+			AvatarURL:   r.AvatarURL,
+			Description: r.Description,
+		})
+	}
+
 	dto := GiveawayDTO{
 		ID:                g.ID,
 		Title:             g.Title,
@@ -270,7 +294,7 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 		UpdatedAt:         g.UpdatedAt,
 		Prizes:            g.Prizes,
 		Sponsors:          g.Sponsors,
-		Requirements:      g.Requirements,
+		Requirements:      reqs,
 		Winners:           g.Winners,
 		ParticipantsCount: g.ParticipantsCount,
 		UserRole:          userRole,
