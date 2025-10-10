@@ -2,7 +2,7 @@ package http
 
 import (
 	"github.com/gofiber/fiber/v2"
-	tgsvc "github.com/your-org/giveaway-backend/internal/service/telegram"
+	tgsvc "github.com/open-builders/giveaway-backend/internal/service/telegram"
 )
 
 // RequirementsHandlers exposes available requirement types for the client.

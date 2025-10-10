@@ -7,15 +7,15 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 
-	rcache "github.com/your-org/giveaway-backend/internal/cache/redis"
-	"github.com/your-org/giveaway-backend/internal/config"
-	mw "github.com/your-org/giveaway-backend/internal/http/middleware"
-	redisp "github.com/your-org/giveaway-backend/internal/platform/redis"
-	pgrepo "github.com/your-org/giveaway-backend/internal/repository/postgres"
-	"github.com/your-org/giveaway-backend/internal/service/channels"
-	gsvc "github.com/your-org/giveaway-backend/internal/service/giveaway"
-	"github.com/your-org/giveaway-backend/internal/service/telegram"
-	usersvc "github.com/your-org/giveaway-backend/internal/service/user"
+	rcache "github.com/open-builders/giveaway-backend/internal/cache/redis"
+	"github.com/open-builders/giveaway-backend/internal/config"
+	mw "github.com/open-builders/giveaway-backend/internal/http/middleware"
+	redisp "github.com/open-builders/giveaway-backend/internal/platform/redis"
+	pgrepo "github.com/open-builders/giveaway-backend/internal/repository/postgres"
+	"github.com/open-builders/giveaway-backend/internal/service/channels"
+	gsvc "github.com/open-builders/giveaway-backend/internal/service/giveaway"
+	"github.com/open-builders/giveaway-backend/internal/service/telegram"
+	usersvc "github.com/open-builders/giveaway-backend/internal/service/user"
 )
 
 // NewFiberApp builds a Fiber application with routes and middlewares wired.

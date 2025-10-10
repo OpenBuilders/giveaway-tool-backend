@@ -1,4 +1,4 @@
-module github.com/your-org/giveaway-backend
+module github.com/open-builders/giveaway-backend
 
 go 1.23.1
 

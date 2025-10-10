@@ -2,7 +2,7 @@ package http
 
 import (
 	"github.com/gofiber/fiber/v2"
-	tg "github.com/your-org/giveaway-backend/internal/service/telegram"
+	tg "github.com/open-builders/giveaway-backend/internal/service/telegram"
 )
 
 // ChannelHandlers exposes channel-related endpoints backed by Telegram client.

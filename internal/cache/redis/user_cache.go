@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	rplatform "github.com/your-org/giveaway-backend/internal/platform/redis"
-	domain "github.com/your-org/giveaway-backend/internal/domain/user"
+	domain "github.com/open-builders/giveaway-backend/internal/domain/user"
+	rplatform "github.com/open-builders/giveaway-backend/internal/platform/redis"
 )
 
 // UserCache provides Redis-based caching for users.
@@ -21,7 +21,9 @@ func NewUserCache(client *rplatform.Client, ttl time.Duration) *UserCache {
 }
 
 func (c *UserCache) keyByID(id int64) string { return fmt.Sprintf("user:id:%d", id) }
-func (c *UserCache) keyByUsername(username string) string { return fmt.Sprintf("user:username:%s", username) }
+func (c *UserCache) keyByUsername(username string) string {
+	return fmt.Sprintf("user:username:%s", username)
+}
 
 // Set stores user by id and username keys.
 func (c *UserCache) Set(ctx context.Context, u *domain.User) error {

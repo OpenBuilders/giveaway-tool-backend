@@ -6,10 +6,10 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
-	domain "github.com/your-org/giveaway-backend/internal/domain/user"
-	mw "github.com/your-org/giveaway-backend/internal/http/middleware"
-	chsvc "github.com/your-org/giveaway-backend/internal/service/channels"
-	usersvc "github.com/your-org/giveaway-backend/internal/service/user"
+	domain "github.com/open-builders/giveaway-backend/internal/domain/user"
+	mw "github.com/open-builders/giveaway-backend/internal/http/middleware"
+	chsvc "github.com/open-builders/giveaway-backend/internal/service/channels"
+	usersvc "github.com/open-builders/giveaway-backend/internal/service/user"
 )
 
 // UserHandlersFiber wires Fiber endpoints to the UserService.

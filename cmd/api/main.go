@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
-	"github.com/your-org/giveaway-backend/internal/config"
-	apphttp "github.com/your-org/giveaway-backend/internal/http"
-	"github.com/your-org/giveaway-backend/internal/platform/db"
-	redisplatform "github.com/your-org/giveaway-backend/internal/platform/redis"
-	pgrepo "github.com/your-org/giveaway-backend/internal/repository/postgres"
-	gsvc "github.com/your-org/giveaway-backend/internal/service/giveaway"
+	"github.com/open-builders/giveaway-backend/internal/config"
+	apphttp "github.com/open-builders/giveaway-backend/internal/http"
+	"github.com/open-builders/giveaway-backend/internal/platform/db"
+	redisplatform "github.com/open-builders/giveaway-backend/internal/platform/redis"
+	pgrepo "github.com/open-builders/giveaway-backend/internal/repository/postgres"
+	gsvc "github.com/open-builders/giveaway-backend/internal/service/giveaway"
 )
 
 func main() {
