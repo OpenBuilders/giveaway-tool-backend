@@ -12,13 +12,12 @@ const (
 // Requirement describes a single requirement entry for a giveaway.
 // For subscription, either ChannelID or ChannelUsername should be provided.
 type Requirement struct {
-	Type RequirementType `json:"type"`
-	// Internal fields not exposed in API directly
-	ChannelID  int64  `json:"-"`
-	ChannelURL string `json:"-"`
-	// API-facing fields per frontend contract
-	ChannelUsername string `json:"username,omitempty"`
-	ChannelTitle    string `json:"name,omitempty"`
-	AvatarURL       string `json:"avatar_url,omitempty"`
-	Description     string `json:"description,omitempty"`
+	Type            RequirementType `json:"type"`
+	ChannelID       int64           `json:"channel_id,omitempty"`
+	ChannelUsername string          `json:"channel_username,omitempty"`
+	ChannelTitle    string          `json:"channel_title,omitempty"`
+	ChannelURL      string          `json:"channel_url,omitempty"`
+	AvatarURL       string          `json:"avatar_url,omitempty"`
+	Title           string          `json:"title,omitempty"`
+	Description     string          `json:"description,omitempty"`
 }
