@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	dg "github.com/your-org/giveaway-backend/internal/domain/giveaway"
-	repo "github.com/your-org/giveaway-backend/internal/repository/postgres"
-	tg "github.com/your-org/giveaway-backend/internal/service/telegram"
+	dg "github.com/open-builders/giveaway-backend/internal/domain/giveaway"
+	repo "github.com/open-builders/giveaway-backend/internal/repository/postgres"
+	tg "github.com/open-builders/giveaway-backend/internal/service/telegram"
 )
 
 // Service contains business rules for giveaways.

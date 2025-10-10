@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	domain "github.com/your-org/giveaway-backend/internal/domain/user"
+	domain "github.com/open-builders/giveaway-backend/internal/domain/user"
 )
 
 // UserRepository provides CRUD operations for users in Postgres.

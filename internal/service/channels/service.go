@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"strconv"
 
+	rplatform "github.com/open-builders/giveaway-backend/internal/platform/redis"
 	"github.com/redis/go-redis/v9"
-	rplatform "github.com/your-org/giveaway-backend/internal/platform/redis"
 )
 
 // Channel holds minimal channel info via Redis storage

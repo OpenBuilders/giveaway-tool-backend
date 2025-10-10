@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	rplatform "github.com/your-org/giveaway-backend/internal/platform/redis"
+	rplatform "github.com/open-builders/giveaway-backend/internal/platform/redis"
 )
 
 type cachedResponse struct {

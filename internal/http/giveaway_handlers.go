@@ -7,11 +7,11 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
-	dg "github.com/your-org/giveaway-backend/internal/domain/giveaway"
-	"github.com/your-org/giveaway-backend/internal/http/middleware"
-	chsvc "github.com/your-org/giveaway-backend/internal/service/channels"
-	gsvc "github.com/your-org/giveaway-backend/internal/service/giveaway"
-	tgsvc "github.com/your-org/giveaway-backend/internal/service/telegram"
+	dg "github.com/open-builders/giveaway-backend/internal/domain/giveaway"
+	"github.com/open-builders/giveaway-backend/internal/http/middleware"
+	chsvc "github.com/open-builders/giveaway-backend/internal/service/channels"
+	gsvc "github.com/open-builders/giveaway-backend/internal/service/giveaway"
+	tgsvc "github.com/open-builders/giveaway-backend/internal/service/telegram"
 )
 
 // GiveawayHandlersFiber provides Fiber endpoints for giveaways.

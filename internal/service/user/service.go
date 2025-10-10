@@ -5,9 +5,9 @@ import (
 	"errors"
 	"time"
 
-	rcache "github.com/your-org/giveaway-backend/internal/cache/redis"
-	domain "github.com/your-org/giveaway-backend/internal/domain/user"
-	pgrepo "github.com/your-org/giveaway-backend/internal/repository/postgres"
+	rcache "github.com/open-builders/giveaway-backend/internal/cache/redis"
+	domain "github.com/open-builders/giveaway-backend/internal/domain/user"
+	pgrepo "github.com/open-builders/giveaway-backend/internal/repository/postgres"
 )
 
 // Service orchestrates user access with repository and cache.

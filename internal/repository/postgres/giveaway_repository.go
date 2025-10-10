@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"math/rand"
 
-	dg "github.com/your-org/giveaway-backend/internal/domain/giveaway"
+	dg "github.com/open-builders/giveaway-backend/internal/domain/giveaway"
 )
 
 // GiveawayRepository persists giveaways and their nested entities.
