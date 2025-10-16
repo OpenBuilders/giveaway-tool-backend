@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"database/sql"
 	"time"
 
@@ -29,9 +30,38 @@ func NewFiberApp(pg *sql.DB, rdb *redisp.Client, cfg *config.Config) *fiber.App 
 		AllowMethods: "GET,POST,PUT,PATCH,DELETE,OPTIONS",
 	}))
 
-	// Public health check
+	// Liveness probe: process is up and Fiber is serving
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{"status": "ok"})
+	})
+
+	// Readiness probe: downstream deps (DB, Redis) are reachable
+	app.Get("/readyz", func(c *fiber.Ctx) error {
+		ctx, cancel := context.WithTimeout(c.Context(), 2*time.Second)
+		defer cancel()
+
+		deps := make(map[string]any)
+		ready := true
+
+		if err := pg.PingContext(ctx); err != nil {
+			ready = false
+			deps["postgres"] = fiber.Map{"ok": false, "error": err.Error()}
+		} else {
+			deps["postgres"] = fiber.Map{"ok": true}
+		}
+
+		if err := rdb.Ping(ctx).Err(); err != nil {
+			ready = false
+			deps["redis"] = fiber.Map{"ok": false, "error": err.Error()}
+		} else {
+			deps["redis"] = fiber.Map{"ok": true}
+		}
+
+		status := fiber.StatusOK
+		if !ready {
+			status = fiber.StatusServiceUnavailable
+		}
+		return c.Status(status).JSON(fiber.Map{"ready": ready, "deps": deps})
 	})
 
 	// User domain deps
