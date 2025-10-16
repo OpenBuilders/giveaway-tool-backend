@@ -13,6 +13,8 @@ type Config struct {
 	RedisAddr     string
 	RedisPassword string
 	RedisDB       int
+	// DB migrations
+	DBAutoMigrate bool
 	// CORS settings
 	CORSAllowedOrigins string
 	// Telegram init-data validation settings
@@ -51,6 +53,10 @@ func Load() (*Config, error) {
 		} else {
 			return nil, fmt.Errorf("invalid GIVEAWAY_EXPIRE_INTERVAL_SEC: %w", err)
 		}
+	}
+	// DB_AUTO_MIGRATE: if true, app runs migrations on start
+	if v := getEnv("DB_AUTO_MIGRATE", "false"); v != "" {
+		cfg.DBAutoMigrate = v == "true" || v == "1" || v == "yes" || v == "on"
 	}
 	return cfg, nil
 }

@@ -14,10 +14,11 @@ import (
 	redisplatform "github.com/open-builders/giveaway-backend/internal/platform/redis"
 	pgrepo "github.com/open-builders/giveaway-backend/internal/repository/postgres"
 	gsvc "github.com/open-builders/giveaway-backend/internal/service/giveaway"
+	migfs "github.com/open-builders/giveaway-backend/migrations"
+	"github.com/pressly/goose/v3"
 )
 
 func main() {
-	// Create cancellable root context for graceful shutdown.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -35,6 +36,17 @@ func main() {
 		log.Fatalf("postgres open: %v", err)
 	}
 	defer pg.Close()
+
+	// Auto-migrate DB on start if configured
+	if cfg.DBAutoMigrate {
+		if err := goose.SetDialect("postgres"); err != nil {
+			log.Fatalf("goose dialect: %v", err)
+		}
+		goose.SetBaseFS(migfs.Files)
+		if err := goose.Up(pg, "."); err != nil {
+			log.Fatalf("migrations up: %v", err)
+		}
+	}
 
 	rdb, err := redisplatform.Open(ctx, cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)
 	if err != nil {
@@ -71,9 +83,9 @@ func main() {
 
 	<-ctx.Done()
 	stop()
-	cancel := func() {} // no-op for consistent pattern with net/http version
+	cancel := func() {}
 	defer cancel()
-	// Fiber graceful shutdown
+
 	if err := app.Shutdown(); err != nil {
 		log.Printf("server shutdown: %v", err)
 	}
