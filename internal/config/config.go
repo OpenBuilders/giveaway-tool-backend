@@ -20,6 +20,11 @@ type Config struct {
 	InitDataTTL      int    // TTL in seconds for init-data expiration (0 to skip)
 	// Workers
 	GiveawayExpireIntervalSec int // background worker tick seconds
+	// TON Proof
+	TonProofDomain        string // expected domain in proof
+	TonProofPayloadTTLSec int    // TTL for payloads
+	TonAPIBaseURL         string // optional TonAPI base URL
+	TonAPIToken           string // optional TonAPI token (Bearer)
 }
 
 // Load reads environment variables into Config with sane defaults for local dev.
@@ -31,6 +36,9 @@ func Load() (*Config, error) {
 		RedisPassword:      getEnv("REDIS_PASSWORD", ""),
 		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "*"),
 		TelegramBotToken:   getEnv("TELEGRAM_BOT_TOKEN", ""),
+		TonProofDomain:     getEnv("TON_PROOF_DOMAIN", ""),
+		TonAPIBaseURL:      getEnv("TONAPI_BASE_URL", "https://tonapi.io"),
+		TonAPIToken:        getEnv("TONAPI_TOKEN", ""),
 	}
 	redisDBStr := getEnv("REDIS_DB", "0")
 	dbNum, err := strconv.Atoi(redisDBStr)
