@@ -16,6 +16,7 @@ import (
 	"github.com/open-builders/giveaway-backend/internal/service/channels"
 	gsvc "github.com/open-builders/giveaway-backend/internal/service/giveaway"
 	"github.com/open-builders/giveaway-backend/internal/service/telegram"
+	"github.com/open-builders/giveaway-backend/internal/service/tonproof"
 	usersvc "github.com/open-builders/giveaway-backend/internal/service/user"
 )
 
@@ -70,6 +71,9 @@ func NewFiberApp(pg *sql.DB, rdb *redisp.Client, cfg *config.Config) *fiber.App 
 	us := usersvc.NewService(repo, cache)
 	chs := channels.NewService(rdb)
 	uh := NewUserHandlersFiber(us, chs)
+	// TON Proof service
+	tps := tonproof.NewService(rdb, cfg.TonProofDomain, cfg.TonProofPayloadTTLSec, cfg.TonAPIBaseURL, cfg.TonAPIToken)
+	uh.AttachTonProof(tps, cfg.TonProofDomain)
 
 	// Giveaway domain deps
 	gRepo := pgrepo.NewGiveawayRepository(pg)

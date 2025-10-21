@@ -69,6 +69,33 @@ func (s *Service) Upsert(ctx context.Context, u *domain.User) error {
 	return nil
 }
 
+// UpdateWallet sets or updates the wallet address for a user and refreshes cache.
+func (s *Service) UpdateWallet(ctx context.Context, id int64, wallet string) error {
+	if id == 0 || wallet == "" {
+		return errors.New("invalid args")
+	}
+	// Fetch existing and upsert with wallet
+	u, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if u == nil {
+		u = &domain.User{ID: id, Status: "active", Role: "user"}
+	}
+	u.WalletAddress = wallet
+	if u.CreatedAt.IsZero() {
+		u.CreatedAt = time.Now().UTC()
+	}
+	u.UpdatedAt = time.Now().UTC()
+	if err := s.repo.Upsert(ctx, u); err != nil {
+		return err
+	}
+	if s.cache != nil {
+		_ = s.cache.Set(ctx, u)
+	}
+	return nil
+}
+
 func (s *Service) Delete(ctx context.Context, id int64) error {
 	u, _ := s.repo.GetByID(ctx, id)
 	if err := s.repo.Delete(ctx, id); err != nil {
