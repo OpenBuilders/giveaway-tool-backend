@@ -24,8 +24,8 @@ func (h *RequirementsHandlers) listTemplates(c *fiber.Ctx) error {
 		{"type": "subscription", "name": "Channel Subscription", "description": "User must be a member of specified channels"},
 		{"type": "boost", "name": "Channel Boost", "description": "User must have active boost in specified channels"},
 		{"type": "custom", "name": "Custom", "description": "User must fulfill custom requirement"},
-        {"type": "holdton", "name": "Hold TON", "description": "User must hold minimum TON balance"},
-        {"type": "holdjetton", "name": "Hold Jetton", "description": "User must hold minimum amount of specified jetton"},
+		{"type": "holdton", "name": "Hold TON", "description": "User must hold minimum TON balance"},
+		{"type": "holdjetton", "name": "Hold Jetton", "description": "User must hold minimum amount of specified jetton"},
 	})
 }
 

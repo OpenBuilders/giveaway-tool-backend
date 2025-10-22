@@ -27,6 +27,8 @@ type Config struct {
 	TonProofPayloadTTLSec int    // TTL for payloads
 	TonAPIBaseURL         string // optional TonAPI base URL
 	TonAPIToken           string // optional TonAPI token (Bearer)
+    // TON Lite client
+    TonLiteConfigURL string // optional global config URL (defaults to https://ton.org/global-config.json)
 }
 
 // Load reads environment variables into Config with sane defaults for local dev.
@@ -41,6 +43,7 @@ func Load() (*Config, error) {
 		TonProofDomain:     getEnv("TON_PROOF_DOMAIN", ""),
 		TonAPIBaseURL:      getEnv("TONAPI_BASE_URL", "https://tonapi.io"),
 		TonAPIToken:        getEnv("TONAPI_TOKEN", ""),
+        TonLiteConfigURL:   getEnv("TON_LITE_CONFIG_URL", "https://ton.org/global-config.json"),
 	}
 	redisDBStr := getEnv("REDIS_DB", "0")
 	dbNum, err := strconv.Atoi(redisDBStr)
