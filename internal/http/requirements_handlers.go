@@ -1,22 +1,29 @@
 package http
 
 import (
-	"github.com/gofiber/fiber/v2"
-	tgsvc "github.com/open-builders/giveaway-backend/internal/service/telegram"
+    "github.com/gofiber/fiber/v2"
+    mw "github.com/open-builders/giveaway-backend/internal/http/middleware"
+    tgsvc "github.com/open-builders/giveaway-backend/internal/service/telegram"
+    tonb "github.com/open-builders/giveaway-backend/internal/service/tonbalance"
+    usersvc "github.com/open-builders/giveaway-backend/internal/service/user"
 )
 
 // RequirementsHandlers exposes available requirement types for the client.
 type RequirementsHandlers struct {
-	telegram *tgsvc.Client
+    telegram *tgsvc.Client
+    users    *usersvc.Service
+    ton      *tonb.Service
 }
 
-func NewRequirementsHandlers(tg *tgsvc.Client) *RequirementsHandlers {
-	return &RequirementsHandlers{telegram: tg}
+func NewRequirementsHandlers(tg *tgsvc.Client, users *usersvc.Service, ton *tonb.Service) *RequirementsHandlers {
+    return &RequirementsHandlers{telegram: tg, users: users, ton: ton}
 }
 
 func (h *RequirementsHandlers) RegisterFiber(r fiber.Router) {
 	r.Get("/requirements/templates", h.listTemplates)
 	r.Post("/requirements/channels/check-bulk", h.checkBotMembershipBulk)
+    r.Post("/requirements/holdton/check", h.checkHoldTON)
+    r.Post("/requirements/holdjetton/check", h.checkHoldJetton)
 }
 
 func (h *RequirementsHandlers) listTemplates(c *fiber.Ctx) error {
@@ -96,4 +103,69 @@ func (h *RequirementsHandlers) checkBotMembershipBulk(c *fiber.Ctx) error {
 		out = append(out, item)
 	}
 	return c.JSON(fiber.Map{"results": out})
+}
+
+// hold TON check
+type holdTonRequest struct {
+    TonMinBalanceNano int64 `json:"ton_min_balance_nano"`
+}
+
+func (h *RequirementsHandlers) checkHoldTON(c *fiber.Ctx) error {
+    if h.users == nil || h.ton == nil {
+        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "ton service not configured"})
+    }
+    // current user id from init-data
+    uidAny := c.Locals(mw.UserIdCtxParam)
+    userID, _ := uidAny.(int64)
+    if userID == 0 {
+        return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+    }
+    var req holdTonRequest
+    if err := c.BodyParser(&req); err != nil {
+        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid json"})
+    }
+    u, err := h.users.GetByID(c.Context(), userID)
+    if err != nil || u == nil || u.WalletAddress == "" {
+        return c.JSON(fiber.Map{"ok": false, "error": "wallet not linked"})
+    }
+    bal, err := h.ton.GetAddressBalanceNano(c.Context(), u.WalletAddress)
+    if err != nil {
+        return c.JSON(fiber.Map{"ok": false, "error": err.Error()})
+    }
+    ok := req.TonMinBalanceNano <= 0 || bal >= req.TonMinBalanceNano
+    return c.JSON(fiber.Map{"ok": ok, "balance_nano": bal})
+}
+
+// hold Jetton check
+type holdJettonRequest struct {
+    JettonAddress   string `json:"jetton_address"`
+    JettonMinAmount int64  `json:"jetton_min_amount"`
+}
+
+func (h *RequirementsHandlers) checkHoldJetton(c *fiber.Ctx) error {
+    if h.users == nil || h.ton == nil {
+        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "ton service not configured"})
+    }
+    uidAny := c.Locals(mw.UserIdCtxParam)
+    userID, _ := uidAny.(int64)
+    if userID == 0 {
+        return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+    }
+    var req holdJettonRequest
+    if err := c.BodyParser(&req); err != nil {
+        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid json"})
+    }
+    if req.JettonAddress == "" || req.JettonMinAmount <= 0 {
+        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid jetton requirement"})
+    }
+    u, err := h.users.GetByID(c.Context(), userID)
+    if err != nil || u == nil || u.WalletAddress == "" {
+        return c.JSON(fiber.Map{"ok": false, "error": "wallet not linked"})
+    }
+    bal, err := h.ton.GetJettonBalanceNano(c.Context(), u.WalletAddress, req.JettonAddress)
+    if err != nil {
+        return c.JSON(fiber.Map{"ok": false, "error": err.Error()})
+    }
+    ok := bal >= req.JettonMinAmount
+    return c.JSON(fiber.Map{"ok": ok, "balance_nano": bal})
 }
