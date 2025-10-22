@@ -62,20 +62,33 @@ func (r *GiveawayRepository) Create(ctx context.Context, g *dg.Giveaway) error {
 	}
 
 	// Requirements
-	if len(g.Requirements) > 0 {
-		const qReq = `INSERT INTO giveaway_requirements (giveaway_id, type, channel_id, channel_username, name, description) VALUES ($1,$2,$3,$4,$5,$6)`
-		for _, rqm := range g.Requirements {
-			var cid interface{}
-			if rqm.ChannelID != 0 {
-				cid = rqm.ChannelID
-			} else {
-				cid = nil
-			}
-			if _, err = tx.ExecContext(ctx, qReq, g.ID, string(rqm.Type), cid, rqm.ChannelUsername, rqm.ChannelTitle, rqm.Description); err != nil {
-				return err
-			}
-		}
-	}
+    if len(g.Requirements) > 0 {
+        const qReq = `INSERT INTO giveaway_requirements (giveaway_id, type, channel_id, channel_username, name, description, ton_min_balance_nano, jetton_address, jetton_min_amount)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`
+        for _, rqm := range g.Requirements {
+            var cid interface{}
+            if rqm.ChannelID != 0 {
+                cid = rqm.ChannelID
+            } else {
+                cid = nil
+            }
+            var tonMin interface{}
+            if rqm.TonMinBalanceNano != 0 {
+                tonMin = rqm.TonMinBalanceNano
+            } else {
+                tonMin = nil
+            }
+            var jetMin interface{}
+            if rqm.JettonMinAmount != 0 {
+                jetMin = rqm.JettonMinAmount
+            } else {
+                jetMin = nil
+            }
+            if _, err = tx.ExecContext(ctx, qReq, g.ID, string(rqm.Type), cid, rqm.ChannelUsername, rqm.ChannelTitle, rqm.Description, tonMin, rqm.JettonAddress, jetMin); err != nil {
+                return err
+            }
+        }
+    }
 
 	return tx.Commit()
 }
@@ -186,16 +199,19 @@ func (r *GiveawayRepository) GetByID(ctx context.Context, id string) (*dg.Giveaw
 	}
 
 	// Load requirements (support older schema without name/description)
-	rqrows, err := r.db.QueryContext(ctx, `SELECT type, channel_id, channel_username, name, description FROM giveaway_requirements WHERE giveaway_id=$1`, id)
+    rqrows, err := r.db.QueryContext(ctx, `SELECT type, channel_id, channel_username, name, description, ton_min_balance_nano, jetton_address, jetton_min_amount FROM giveaway_requirements WHERE giveaway_id=$1`, id)
 	if err == nil {
 		defer rqrows.Close()
 		for rqrows.Next() {
-			var t string
-			var cid sql.NullInt64
-			var uname sql.NullString
-			var name sql.NullString
-			var desc sql.NullString
-			if err := rqrows.Scan(&t, &cid, &uname, &name, &desc); err != nil {
+            var t string
+            var cid sql.NullInt64
+            var uname sql.NullString
+            var name sql.NullString
+            var desc sql.NullString
+            var ton sql.NullInt64
+            var jaddr sql.NullString
+            var jmin sql.NullInt64
+            if err := rqrows.Scan(&t, &cid, &uname, &name, &desc, &ton, &jaddr, &jmin); err != nil {
 				return nil, err
 			}
 			req := dg.Requirement{Type: dg.RequirementType(t)}
@@ -211,6 +227,15 @@ func (r *GiveawayRepository) GetByID(ctx context.Context, id string) (*dg.Giveaw
 			if desc.Valid {
 				req.Description = desc.String
 			}
+            if ton.Valid {
+                req.TonMinBalanceNano = ton.Int64
+            }
+            if jaddr.Valid {
+                req.JettonAddress = jaddr.String
+            }
+            if jmin.Valid {
+                req.JettonMinAmount = jmin.Int64
+            }
 			g.Requirements = append(g.Requirements, req)
 		}
 	} else {

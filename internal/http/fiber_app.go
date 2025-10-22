@@ -15,8 +15,9 @@ import (
 	pgrepo "github.com/open-builders/giveaway-backend/internal/repository/postgres"
 	"github.com/open-builders/giveaway-backend/internal/service/channels"
 	gsvc "github.com/open-builders/giveaway-backend/internal/service/giveaway"
-	"github.com/open-builders/giveaway-backend/internal/service/telegram"
+    "github.com/open-builders/giveaway-backend/internal/service/telegram"
 	"github.com/open-builders/giveaway-backend/internal/service/tonproof"
+    "github.com/open-builders/giveaway-backend/internal/service/tonbalance"
 	usersvc "github.com/open-builders/giveaway-backend/internal/service/user"
 )
 
@@ -78,8 +79,9 @@ func NewFiberApp(pg *sql.DB, rdb *redisp.Client, cfg *config.Config) *fiber.App 
 	// Giveaway domain deps
 	gRepo := pgrepo.NewGiveawayRepository(pg)
 	tgClient := telegram.NewClientFromEnv()
-	gs := gsvc.NewService(gRepo).WithTelegram(tgClient)
-	gh := NewGiveawayHandlersFiber(gs, chs, tgClient)
+    gs := gsvc.NewService(gRepo).WithTelegram(tgClient)
+    tbs := tonbalance.NewService(cfg.TonAPIBaseURL, cfg.TonAPIToken)
+    gh := NewGiveawayHandlersFiber(gs, chs, tgClient, us, tbs)
 
 	// API groups
 	ttl := time.Duration(cfg.InitDataTTL) * time.Second

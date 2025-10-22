@@ -13,17 +13,21 @@ import (
 	chsvc "github.com/open-builders/giveaway-backend/internal/service/channels"
 	gsvc "github.com/open-builders/giveaway-backend/internal/service/giveaway"
 	tgsvc "github.com/open-builders/giveaway-backend/internal/service/telegram"
+	usersvc "github.com/open-builders/giveaway-backend/internal/service/user"
+	tonb "github.com/open-builders/giveaway-backend/internal/service/tonbalance"
 )
 
 // GiveawayHandlersFiber provides Fiber endpoints for giveaways.
 type GiveawayHandlersFiber struct {
-	service  *gsvc.Service
-	channels *chsvc.Service
-	telegram *tgsvc.Client
+    service  *gsvc.Service
+    channels *chsvc.Service
+    telegram *tgsvc.Client
+    users    *usersvc.Service
+    ton      *tonb.Service
 }
 
-func NewGiveawayHandlersFiber(svc *gsvc.Service, chs *chsvc.Service, tg *tgsvc.Client) *GiveawayHandlersFiber {
-	return &GiveawayHandlersFiber{service: svc, channels: chs, telegram: tg}
+func NewGiveawayHandlersFiber(svc *gsvc.Service, chs *chsvc.Service, tg *tgsvc.Client, users *usersvc.Service, ton *tonb.Service) *GiveawayHandlersFiber {
+    return &GiveawayHandlersFiber{service: svc, channels: chs, telegram: tg, users: users, ton: ton}
 }
 
 func (h *GiveawayHandlersFiber) RegisterFiber(r fiber.Router) {
@@ -74,7 +78,11 @@ type createRequirementReq struct {
 	ChannelID       int64  `json:"channel_id,omitempty"`
 	AvatarURL       string `json:"avatar_url,omitempty"`
 	Name            string `json:"name,omitempty"`
-	Description     string `json:"description,omitempty"`
+    Description     string `json:"description,omitempty"`
+    // On-chain
+    TonMinBalanceNano int64  `json:"ton_min_balance_nano,omitempty"`
+    JettonAddress      string `json:"jetton_address,omitempty"`
+    JettonMinAmount    int64  `json:"jetton_min_amount,omitempty"`
 }
 
 // create handles creation of a new giveaway.
@@ -105,7 +113,7 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 	}
 
 	// Map and enrich requirements first (independent of prizes)
-	for _, r := range req.Requirements {
+    for _, r := range req.Requirements {
 		switch r.Type {
 		case dg.RequirementTypeSubscription:
 			uname := r.ChannelUsername
@@ -162,6 +170,10 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 			g.Requirements = append(g.Requirements, dg.Requirement{Type: dg.RequirementTypeBoost, Description: r.Description})
 		case dg.RequirementTypeCustom:
 			g.Requirements = append(g.Requirements, dg.Requirement{Type: dg.RequirementTypeCustom, ChannelTitle: r.Name, Description: r.Description})
+        case dg.RequirementTypeHoldTON:
+            g.Requirements = append(g.Requirements, dg.Requirement{Type: dg.RequirementTypeHoldTON, TonMinBalanceNano: r.TonMinBalanceNano, Title: r.Name, Description: r.Description})
+        case dg.RequirementTypeHoldJetton:
+            g.Requirements = append(g.Requirements, dg.Requirement{Type: dg.RequirementTypeHoldJetton, JettonAddress: r.JettonAddress, JettonMinAmount: r.JettonMinAmount, Title: r.Name, Description: r.Description})
 		}
 	}
 
@@ -537,7 +549,7 @@ func (h *GiveawayHandlersFiber) checkRequirements(c *fiber.Ctx) error {
 		}
 
 		// Perform requirement check
-		switch rqm.Type {
+        switch rqm.Type {
 		case dg.RequirementTypeSubscription:
 			chat := ""
 			if rqm.ChannelID != 0 {
@@ -585,6 +597,62 @@ func (h *GiveawayHandlersFiber) checkRequirements(c *fiber.Ctx) error {
 		case dg.RequirementTypeCustom:
 			// Custom requirements cannot be verified automatically; treat as success
 			it.Status = "success"
+        case dg.RequirementTypeHoldTON:
+            if h.users == nil || h.ton == nil {
+                it.Error = "ton service not configured"
+                allMet = false
+                break
+            }
+            // current user wallet
+            uidAny := c.Locals(middleware.UserIdCtxParam)
+            uid, _ := uidAny.(int64)
+            u, err := h.users.GetByID(c.Context(), uid)
+            if err != nil || u == nil || u.WalletAddress == "" {
+                it.Error = "wallet not linked"
+                allMet = false
+                break
+            }
+            bal, err := h.ton.GetAddressBalanceNano(c.Context(), u.WalletAddress)
+            if err != nil {
+                it.Error = err.Error()
+                allMet = false
+                break
+            }
+            if rqm.TonMinBalanceNano > 0 && bal >= rqm.TonMinBalanceNano {
+                it.Status = "success"
+            } else {
+                allMet = false
+            }
+        case dg.RequirementTypeHoldJetton:
+            if h.users == nil || h.ton == nil {
+                it.Error = "ton service not configured"
+                allMet = false
+                break
+            }
+            uidAny := c.Locals(middleware.UserIdCtxParam)
+            uid, _ := uidAny.(int64)
+            u, err := h.users.GetByID(c.Context(), uid)
+            if err != nil || u == nil || u.WalletAddress == "" {
+                it.Error = "wallet not linked"
+                allMet = false
+                break
+            }
+            if rqm.JettonAddress == "" || rqm.JettonMinAmount <= 0 {
+                it.Error = "invalid jetton requirement"
+                allMet = false
+                break
+            }
+            bal, err := h.ton.GetJettonBalanceNano(c.Context(), u.WalletAddress, rqm.JettonAddress)
+            if err != nil {
+                it.Error = err.Error()
+                allMet = false
+                break
+            }
+            if bal >= rqm.JettonMinAmount {
+                it.Status = "success"
+            } else {
+                allMet = false
+            }
 		default:
 			it.Error = "unsupported requirement type"
 			allMet = false
