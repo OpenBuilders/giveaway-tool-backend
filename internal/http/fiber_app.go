@@ -76,12 +76,12 @@ func NewFiberApp(pg *sql.DB, rdb *redisp.Client, cfg *config.Config) *fiber.App 
 	tps := tonproof.NewService(rdb, cfg.TonProofDomain, cfg.TonProofPayloadTTLSec, cfg.TonAPIBaseURL, cfg.TonAPIToken)
 	uh.AttachTonProof(tps, cfg.TonProofDomain)
 
-	// Giveaway domain deps
+    // Giveaway domain deps
 	gRepo := pgrepo.NewGiveawayRepository(pg)
 	tgClient := telegram.NewClientFromEnv()
 	gs := gsvc.NewService(gRepo).WithTelegram(tgClient)
-    // TON balance via lite servers
-    tbs := tonbalance.NewLiteService(cfg.TonLiteConfigURL, cfg.TonAPIBaseURL, cfg.TonAPIToken)
+    // TON balance via TonAPI
+    tbs := tonbalance.NewService(cfg.TonAPIBaseURL, cfg.TonAPIToken)
 	gh := NewGiveawayHandlersFiber(gs, chs, tgClient, us, tbs)
 
 	// API groups
