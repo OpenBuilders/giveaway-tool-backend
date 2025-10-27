@@ -649,6 +649,196 @@ func (r *GiveawayRepository) FinishWithWinners(ctx context.Context, id string, w
 	return tx.Commit()
 }
 
+// SetManualWinners replaces winners and distributes prizes while keeping giveaway in pending status.
+// Existing winners and winner_prizes are deleted and replaced.
+func (r *GiveawayRepository) SetManualWinners(ctx context.Context, id string, winners []int64) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	// Ensure current status is pending and lock row
+	var status string
+	if err = tx.QueryRowContext(ctx, `SELECT status FROM giveaways WHERE id=$1 FOR UPDATE`, id).Scan(&status); err != nil {
+		return err
+	}
+	if status != "pending" {
+		return tx.Commit()
+	}
+
+	// Clear previous winners and prizes
+	if _, err = tx.ExecContext(ctx, `DELETE FROM giveaway_winner_prizes WHERE giveaway_id=$1`, id); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM giveaway_winners WHERE giveaway_id=$1`, id); err != nil {
+		return err
+	}
+
+	if len(winners) == 0 {
+		return tx.Commit()
+	}
+
+	// Persist winners per place
+	for place := 1; place <= len(winners); place++ {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winners (giveaway_id, place, user_id) VALUES ($1,$2,$3)`, id, place, winners[place-1]); err != nil {
+			return err
+		}
+	}
+
+	// Load prizes
+	pRows, err := tx.QueryContext(ctx, `SELECT place, title, description, quantity FROM giveaway_prizes WHERE giveaway_id=$1`, id)
+	if err != nil {
+		return err
+	}
+	type prize struct {
+		place       sql.NullInt64
+		title, desc string
+		qty         int
+	}
+	var fixed = map[int][]prize{}
+	var loose []prize
+	for pRows.Next() {
+		var pr prize
+		if err := pRows.Scan(&pr.place, &pr.title, &pr.desc, &pr.qty); err != nil {
+			pRows.Close()
+			return err
+		}
+		if pr.qty <= 0 {
+			pr.qty = 1
+		}
+		if pr.place.Valid {
+			fixed[int(pr.place.Int64)] = append(fixed[int(pr.place.Int64)], pr)
+		} else {
+			loose = append(loose, pr)
+		}
+	}
+	pRows.Close()
+
+	winnersCount := len(winners)
+	// Apply fixed prizes
+	for place, list := range fixed {
+		if place <= 0 || place > winnersCount {
+			continue
+		}
+		uid := winners[place-1]
+		for _, pr := range list {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, uid, pr.title, pr.desc); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Winners without fixed
+	without := make([]int64, 0, winnersCount)
+	for place := 1; place <= winnersCount; place++ {
+		if len(fixed[place]) == 0 {
+			without = append(without, winners[place-1])
+		}
+	}
+
+	// Distribute loose prizes using first pass one-per and then round-robin
+	idx := 0
+	for _, pr := range loose {
+		remaining := pr.qty
+		// First pass: one per winner without fixed
+		for i := 0; i < len(without) && remaining > 0; i++ {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, without[i], pr.title, pr.desc); err != nil {
+				return err
+			}
+			remaining--
+		}
+		// Second pass: round-robin across all winners
+		for remaining > 0 && winnersCount > 0 {
+			uid := winners[idx%winnersCount]
+			if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, uid, pr.title, pr.desc); err != nil {
+				return err
+			}
+			remaining--
+			idx++
+		}
+	}
+
+	// Keep status pending
+	return tx.Commit()
+}
+
+// ListWinnersWithPrizes returns winners ordered by place with their prizes regardless of giveaway status.
+func (r *GiveawayRepository) ListWinnersWithPrizes(ctx context.Context, id string) ([]dg.Winner, error) {
+	// Winners by place
+	wrows, err := r.db.QueryContext(ctx, `SELECT place, user_id FROM giveaway_winners WHERE giveaway_id=$1 ORDER BY place ASC`, id)
+	if err != nil {
+		return nil, err
+	}
+	type winner struct {
+		place int
+		user  int64
+	}
+	var winners []winner
+	for wrows.Next() {
+		var pl int
+		var uid int64
+		if err := wrows.Scan(&pl, &uid); err != nil {
+			wrows.Close()
+			return nil, err
+		}
+		winners = append(winners, winner{place: pl, user: uid})
+	}
+	wrows.Close()
+
+	prizemap := map[int64][]dg.WinnerPrize{}
+	prows, err := r.db.QueryContext(ctx, `SELECT user_id, prize_title, prize_description FROM giveaway_winner_prizes WHERE giveaway_id=$1`, id)
+	if err != nil {
+		return nil, err
+	}
+	for prows.Next() {
+		var uid int64
+		var t, d string
+		if err := prows.Scan(&uid, &t, &d); err != nil {
+			prows.Close()
+			return nil, err
+		}
+		prizemap[uid] = append(prizemap[uid], dg.WinnerPrize{Title: t, Description: d})
+	}
+	prows.Close()
+
+	out := make([]dg.Winner, 0, len(winners))
+	for _, w := range winners {
+		out = append(out, dg.Winner{Place: w.place, UserID: w.user, Prizes: prizemap[w.user]})
+	}
+	return out, nil
+}
+
+// ClearWinners removes all winners and their prizes for the giveaway.
+func (r *GiveawayRepository) ClearWinners(ctx context.Context, id string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	// Lock row to serialize concurrent operations
+	var one string
+	if err = tx.QueryRowContext(ctx, `SELECT id FROM giveaways WHERE id=$1 FOR UPDATE`, id).Scan(&one); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM giveaway_winner_prizes WHERE giveaway_id=$1`, id); err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `DELETE FROM giveaway_winners WHERE giveaway_id=$1`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // ListFinishedByCreator returns finished giveaways for the creator.
 func (r *GiveawayRepository) ListFinishedByCreator(ctx context.Context, creatorID int64, limit, offset int) ([]dg.Giveaway, error) {
 	if limit <= 0 || limit > 1000 {
