@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -67,4 +68,24 @@ func InitDataMiddleware(token string, expIn time.Duration) fiber.Handler {
 
 		return c.Next()
 	}
+}
+
+// GetUserID returns the Telegram user id from context locals, supporting multiple stored types.
+func GetUserID(c *fiber.Ctx) int64 {
+	v := c.Locals(UserIdCtxParam)
+	switch t := v.(type) {
+	case int64:
+		return t
+	case int:
+		return int64(t)
+	case uint:
+		return int64(t)
+	case float64:
+		return int64(t)
+	case string:
+		if id, err := strconv.ParseInt(t, 10, 64); err == nil {
+			return id
+		}
+	}
+	return 0
 }

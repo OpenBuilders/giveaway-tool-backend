@@ -41,14 +41,23 @@ func Load() (*Config, error) {
 		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "*"),
 		TelegramBotToken:   getEnv("TELEGRAM_BOT_TOKEN", ""),
 		TonProofDomain:     getEnv("TON_PROOF_DOMAIN", ""),
-		TonAPIBaseURL:      getEnv("TONAPI_BASE_URL", "https://tonapi.io"),
-		TonAPIToken:        getEnv("TONAPI_TOKEN", ""),
-		TonLiteConfigURL:   getEnv("TON_LITE_CONFIG_URL", "https://ton.org/global-config.json"),
+		// Default TTL for payloads (seconds)
+		// Value can be overridden via TON_PROOF_PAYLOAD_TTL_SEC
+		TonAPIBaseURL:    getEnv("TONAPI_BASE_URL", "https://tonapi.io"),
+		TonAPIToken:      getEnv("TONAPI_TOKEN", ""),
+		TonLiteConfigURL: getEnv("TON_LITE_CONFIG_URL", "https://ton.org/global-config.json"),
 	}
 	redisDBStr := getEnv("REDIS_DB", "0")
 	dbNum, err := strconv.Atoi(redisDBStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid REDIS_DB: %w", err)
+	}
+	if v := getEnv("TON_PROOF_PAYLOAD_TTL_SEC", "300"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.TonProofPayloadTTLSec = n
+		} else {
+			return nil, fmt.Errorf("invalid TON_PROOF_PAYLOAD_TTL_SEC: %w", err)
+		}
 	}
 	cfg.RedisDB = dbNum
 	if ttlStr := getEnv("INIT_DATA_TTL", "86400"); ttlStr != "" { // default 24h
