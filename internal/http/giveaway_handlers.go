@@ -261,6 +261,9 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 		TonMinBalanceNano int64  `json:"ton_min_balance_nano,omitempty"`
 		JettonAddress     string `json:"jetton_address,omitempty"`
 		JettonMinAmount   int64  `json:"jetton_min_amount,omitempty"`
+		// Jetton metadata enrichment
+		JettonSymbol string `json:"jetton_symbol,omitempty"`
+		JettonImage  string `json:"jetton_image,omitempty"`
 	}
 
 	type GiveawayDTO struct {
@@ -288,7 +291,7 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 		if name == "" {
 			name = r.Title
 		}
-		reqs = append(reqs, requirementDTO{
+		it := requirementDTO{
 			Name:              name,
 			Type:              r.Type,
 			Username:          r.ChannelUsername,
@@ -297,7 +300,14 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 			TonMinBalanceNano: r.TonMinBalanceNano,
 			JettonAddress:     r.JettonAddress,
 			JettonMinAmount:   r.JettonMinAmount,
-		})
+		}
+		if r.Type == dg.RequirementTypeHoldJetton && r.JettonAddress != "" && h.ton != nil {
+			if meta, err := h.ton.GetJettonMeta(c.Context(), r.JettonAddress); err == nil && meta != nil {
+				it.JettonSymbol = meta.Symbol
+				it.JettonImage = meta.Image
+			}
+		}
+		reqs = append(reqs, it)
 	}
 
 	dto := GiveawayDTO{

@@ -26,6 +26,7 @@ func (h *RequirementsHandlers) RegisterFiber(r fiber.Router) {
 	r.Post("/requirements/channels/check-bulk", h.checkBotMembershipBulk)
 	r.Post("/requirements/holdton/check", h.checkHoldTON)
 	r.Post("/requirements/holdjetton/check", h.checkHoldJetton)
+	r.Get("/jettons/:address/metadata", h.getJettonMetadata)
 }
 
 func (h *RequirementsHandlers) listTemplates(c *fiber.Ctx) error {
@@ -178,4 +179,25 @@ func (h *RequirementsHandlers) checkHoldJetton(c *fiber.Ctx) error {
 	balBI := new(big.Int).SetInt64(bal)
 	ok := balBI.Cmp(reqSmall) >= 0
 	return c.JSON(fiber.Map{"ok": ok, "balance_nano": bal})
+}
+
+// getJettonMetadata returns jetton metadata (decimals, symbol, image) for a given jetton master address
+func (h *RequirementsHandlers) getJettonMetadata(c *fiber.Ctx) error {
+	if h.ton == nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "ton service not configured"})
+	}
+	addr := c.Params("address")
+	if addr == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing address"})
+	}
+	meta, err := h.ton.GetJettonMeta(c.Context(), addr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{
+		"address":  addr,
+		"decimals": meta.Decimals,
+		"symbol":   meta.Symbol,
+		"image":    meta.Image,
+	})
 }
