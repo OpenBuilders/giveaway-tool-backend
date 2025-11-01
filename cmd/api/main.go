@@ -13,7 +13,10 @@ import (
 	"github.com/open-builders/giveaway-backend/internal/platform/db"
 	redisplatform "github.com/open-builders/giveaway-backend/internal/platform/redis"
 	pgrepo "github.com/open-builders/giveaway-backend/internal/repository/postgres"
+	"github.com/open-builders/giveaway-backend/internal/service/channels"
 	gsvc "github.com/open-builders/giveaway-backend/internal/service/giveaway"
+	notify "github.com/open-builders/giveaway-backend/internal/service/notifications"
+	tg "github.com/open-builders/giveaway-backend/internal/service/telegram"
 	migfs "github.com/open-builders/giveaway-backend/migrations"
 	"github.com/pressly/goose/v3"
 )
@@ -57,7 +60,13 @@ func main() {
 	app := apphttp.NewFiberApp(pg, rdb, cfg)
 
 	// Start background worker for finishing expired giveaways
-	expSvc := gsvc.NewService(pgrepo.NewGiveawayRepository(pg))
+	expRepo := pgrepo.NewGiveawayRepository(pg)
+	expSvc := gsvc.NewService(expRepo)
+	// Attach Telegram + notifications so worker can emit completion messages
+	tgClient := tg.NewClientFromEnv()
+	chs := channels.NewService(rdb)
+	notifier := notify.NewService(tgClient, chs, cfg.WebAppBaseURL)
+	expSvc = expSvc.WithTelegram(tgClient).WithNotifier(notifier)
 	go func() {
 		ticker := time.NewTicker(time.Duration(cfg.GiveawayExpireIntervalSec) * time.Second)
 		defer ticker.Stop()

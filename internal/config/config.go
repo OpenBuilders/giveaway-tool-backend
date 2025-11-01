@@ -29,6 +29,8 @@ type Config struct {
 	TonAPIToken           string // optional TonAPI token (Bearer)
 	// TON Lite client
 	TonLiteConfigURL string // optional global config URL (defaults to https://ton.org/global-config.json)
+	// WebApp
+	WebAppBaseURL string // base URL for webapp, used in notifications buttons
 }
 
 // Load reads environment variables into Config with sane defaults for local dev.
@@ -44,6 +46,7 @@ func Load() (*Config, error) {
 		TonAPIBaseURL:      getEnv("TONAPI_BASE_URL", "https://tonapi.io"),
 		TonAPIToken:        getEnv("TONAPI_TOKEN", ""),
 		TonLiteConfigURL:   getEnv("TON_LITE_CONFIG_URL", "https://ton.org/global-config.json"),
+		WebAppBaseURL:      getEnv("WEBAPP_BASE_URL", ""),
 	}
 	redisDBStr := getEnv("REDIS_DB", "0")
 	dbNum, err := strconv.Atoi(redisDBStr)

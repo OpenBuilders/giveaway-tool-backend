@@ -164,6 +164,44 @@ func (c *Client) makeRequest(ctx context.Context, method, endpoint string, data 
 	return dec.Decode(out)
 }
 
+// SendMessage sends a message to a chat/channel with optional inline button using Telegram Bot API.
+// If buttonText and buttonURL are non-empty, an inline keyboard with a single button is attached.
+// parseMode can be "HTML" or "MarkdownV2"; empty means no parse mode.
+func (c *Client) SendMessage(ctx context.Context, chatID int64, text string, parseMode string, buttonText string, buttonURL string, disablePreview bool) error {
+	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", c.token)
+	data := url.Values{
+		"chat_id": {fmt.Sprintf("%d", chatID)},
+		"text":    {text},
+	}
+	if parseMode != "" {
+		data.Set("parse_mode", parseMode)
+	}
+	if disablePreview {
+		data.Set("disable_web_page_preview", "true")
+	}
+	if buttonText != "" && buttonURL != "" {
+		// Minimal inline keyboard with one button
+		markup := fmt.Sprintf(`{"inline_keyboard":[[{"text":"%s","url":"%s"}]]}`,
+			escapeJSON(buttonText), escapeJSON(buttonURL))
+		data.Set("reply_markup", markup)
+	}
+	var resp tgResponse[map[string]any]
+	if err := c.makeRequest(ctx, http.MethodPost, endpoint, data, &resp); err != nil {
+		return err
+	}
+	if !resp.Ok {
+		return fmt.Errorf("telegram sendMessage error: %s", resp.Description)
+	}
+	return nil
+}
+
+// escapeJSON performs a minimal escape for quotes and backslashes used in inline JSON strings.
+func escapeJSON(s string) string {
+	s = strings.ReplaceAll(s, `\\`, `\\\\`)
+	s = strings.ReplaceAll(s, `"`, `\\\"`)
+	return s
+}
+
 // ChatMember minimal subset for membership checks
 type ChatMember struct {
 	Status string `json:"status"`

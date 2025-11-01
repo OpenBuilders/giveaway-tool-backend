@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	dg "github.com/open-builders/giveaway-backend/internal/domain/giveaway"
 	repo "github.com/open-builders/giveaway-backend/internal/repository/postgres"
+	notify "github.com/open-builders/giveaway-backend/internal/service/notifications"
 	tg "github.com/open-builders/giveaway-backend/internal/service/telegram"
 )
 
@@ -18,12 +19,16 @@ import (
 type Service struct {
 	repo *repo.GiveawayRepository
 	tg   *tg.Client
+	ntf  *notify.Service
 }
 
 func NewService(r *repo.GiveawayRepository) *Service { return &Service{repo: r} }
 
 // WithTelegram injects a Telegram client for requirements checks and enrichment.
 func (s *Service) WithTelegram(client *tg.Client) *Service { s.tg = client; return s }
+
+// WithNotifier injects notifications service for broadcasting updates.
+func (s *Service) WithNotifier(n *notify.Service) *Service { s.ntf = n; return s }
 
 // Create validates and persists a new giveaway.
 func (s *Service) Create(ctx context.Context, g *dg.Giveaway) (string, error) {
@@ -66,6 +71,10 @@ func (s *Service) Create(ctx context.Context, g *dg.Giveaway) (string, error) {
 
 	if err := s.repo.Create(ctx, g); err != nil {
 		return "", err
+	}
+	// Best-effort notification to creator channels
+	if s.ntf != nil {
+		go s.ntf.NotifyStarted(context.Background(), g)
 	}
 	return id, nil
 }
@@ -264,7 +273,14 @@ func (s *Service) FinishOneWithDistribution(ctx context.Context, id string) erro
 	if winnersCount <= 0 {
 		winnersCount = 1
 	}
-	return s.repo.FinishOneWithDistribution(ctx, id, winnersCount)
+	if err := s.repo.FinishOneWithDistribution(ctx, id, winnersCount); err != nil {
+		return err
+	}
+	// Best-effort completion notification
+	if s.ntf != nil {
+		go s.ntf.NotifyCompleted(context.Background(), g, winnersCount)
+	}
+	return nil
 }
 
 // FinalizePendingWithCandidates filters provided candidates by non-custom requirements and finalizes giveaway.

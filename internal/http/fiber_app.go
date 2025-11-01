@@ -15,6 +15,7 @@ import (
 	pgrepo "github.com/open-builders/giveaway-backend/internal/repository/postgres"
 	"github.com/open-builders/giveaway-backend/internal/service/channels"
 	gsvc "github.com/open-builders/giveaway-backend/internal/service/giveaway"
+	notify "github.com/open-builders/giveaway-backend/internal/service/notifications"
 	"github.com/open-builders/giveaway-backend/internal/service/telegram"
 	"github.com/open-builders/giveaway-backend/internal/service/tonbalance"
 	"github.com/open-builders/giveaway-backend/internal/service/tonproof"
@@ -79,7 +80,8 @@ func NewFiberApp(pg *sql.DB, rdb *redisp.Client, cfg *config.Config) *fiber.App 
 	// Giveaway domain deps
 	gRepo := pgrepo.NewGiveawayRepository(pg)
 	tgClient := telegram.NewClientFromEnv()
-	gs := gsvc.NewService(gRepo).WithTelegram(tgClient)
+	notifier := notify.NewService(tgClient, chs, cfg.WebAppBaseURL)
+	gs := gsvc.NewService(gRepo).WithTelegram(tgClient).WithNotifier(notifier)
 	// TON balance via TonAPI
 	tbs := tonbalance.NewService(cfg.TonAPIBaseURL, cfg.TonAPIToken)
 	gh := NewGiveawayHandlersFiber(gs, chs, tgClient, us, tbs)
@@ -94,7 +96,7 @@ func NewFiberApp(pg *sql.DB, rdb *redisp.Client, cfg *config.Config) *fiber.App 
 	// Telegram channels endpoints (public; no init-data required)
 	ch := NewChannelHandlers(tgClient)
 	ch.RegisterFiber(v1)
-    rq := NewRequirementsHandlers(tgClient, us, tbs)
+	rq := NewRequirementsHandlers(tgClient, us, tbs)
 	rq.RegisterFiber(v1)
 
 	return app
