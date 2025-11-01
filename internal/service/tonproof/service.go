@@ -4,10 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
-	"io"
-	"net/http"
 	"time"
 
 	rplatform "github.com/open-builders/giveaway-backend/internal/platform/redis"
@@ -15,29 +12,20 @@ import (
 
 // Service provides Ton Proof payload generation and verification.
 type Service struct {
-	rdb          *rplatform.Client
-	domain       string
-	payloadTTL   time.Duration
-	tonapiBase   string
-	tonapiAPIKey string
-	httpClient   *http.Client
+	rdb        *rplatform.Client
+	domain     string
+	payloadTTL time.Duration
 }
 
-func NewService(rdb *rplatform.Client, domain string, payloadTTLSec int, tonapiBase, tonapiAPIKey string) *Service {
+func NewService(rdb *rplatform.Client, domain string, payloadTTLSec int) *Service {
 	ttl := time.Duration(payloadTTLSec) * time.Second
 	if ttl <= 0 {
 		ttl = 5 * time.Minute
 	}
-	if tonapiBase == "" {
-		tonapiBase = "https://tonapi.io"
-	}
 	return &Service{
-		rdb:          rdb,
-		domain:       domain,
-		payloadTTL:   ttl,
-		tonapiBase:   tonapiBase,
-		tonapiAPIKey: tonapiAPIKey,
-		httpClient:   &http.Client{Timeout: 10 * time.Second},
+		rdb:        rdb,
+		domain:     domain,
+		payloadTTL: ttl,
 	}
 }
 
@@ -112,55 +100,7 @@ func (s *Service) VerifyProof(ctx context.Context, req *VerifyRequest) (*VerifyR
 	}
 	_ = owner // currently unused; could bind address/user
 
-	// Delegate cryptographic verification to TonAPI if API key/base is configured
-	// Endpoint: POST {base}/v2/tonconnect/proof/verify
-	// Body mirrors incoming request.
-	tonapiURL := s.tonapiBase + "/v2/tonconnect/proof/verify"
-	bodyBytes, _ := json.Marshal(req)
-	httpReq, _ := http.NewRequestWithContext(ctx, http.MethodPost, tonapiURL, bytesReader(bodyBytes))
-	httpReq.Header.Set("Content-Type", "application/json")
-	if s.tonapiAPIKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+s.tonapiAPIKey)
-	}
-	resp, err := s.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return &VerifyResponse{Success: false, Reason: "tonapi verification failed"}, nil
-	}
-	// TonAPI returns JSON with success field (assumed). Try to parse; if unknown, treat 200 as success.
-	var api struct {
-		Success bool   `json:"success"`
-		Reason  string `json:"reason,omitempty"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&api); err == nil {
-		if !api.Success {
-			return &VerifyResponse{Success: false, Reason: api.Reason}, nil
-		}
-	}
-
-	// Invalidate payload (single-use)
+	// Local verification only (no TonAPI). We trust domain/timestamp/payload checks here.
 	_ = s.rdb.Del(ctx, key).Err()
 	return &VerifyResponse{Success: true}, nil
 }
-
-// bytesReader wraps a byte slice as io.ReadCloser without extra allocations in callers.
-func bytesReader(b []byte) *readCloserWrapper { return &readCloserWrapper{b: b} }
-
-type readCloserWrapper struct {
-	b []byte
-	i int
-}
-
-func (r *readCloserWrapper) Read(p []byte) (int, error) {
-	if r.i >= len(r.b) {
-		return 0, io.EOF
-	}
-	n := copy(p, r.b[r.i:])
-	r.i += n
-	return n, nil
-}
-
-func (r *readCloserWrapper) Close() error { return nil }

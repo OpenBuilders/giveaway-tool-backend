@@ -1,38 +1,41 @@
 package http
 
 import (
-    "github.com/gofiber/fiber/v2"
-    mw "github.com/open-builders/giveaway-backend/internal/http/middleware"
-    tgsvc "github.com/open-builders/giveaway-backend/internal/service/telegram"
-    tonb "github.com/open-builders/giveaway-backend/internal/service/tonbalance"
-    usersvc "github.com/open-builders/giveaway-backend/internal/service/user"
+	"math/big"
+
+	"github.com/gofiber/fiber/v2"
+	mw "github.com/open-builders/giveaway-backend/internal/http/middleware"
+	tgsvc "github.com/open-builders/giveaway-backend/internal/service/telegram"
+	tonb "github.com/open-builders/giveaway-backend/internal/service/tonbalance"
+	usersvc "github.com/open-builders/giveaway-backend/internal/service/user"
 )
 
 // RequirementsHandlers exposes available requirement types for the client.
 type RequirementsHandlers struct {
-    telegram *tgsvc.Client
-    users    *usersvc.Service
-    ton      *tonb.Service
+	telegram *tgsvc.Client
+	users    *usersvc.Service
+	ton      *tonb.Service
 }
 
 func NewRequirementsHandlers(tg *tgsvc.Client, users *usersvc.Service, ton *tonb.Service) *RequirementsHandlers {
-    return &RequirementsHandlers{telegram: tg, users: users, ton: ton}
+	return &RequirementsHandlers{telegram: tg, users: users, ton: ton}
 }
 
 func (h *RequirementsHandlers) RegisterFiber(r fiber.Router) {
 	r.Get("/requirements/templates", h.listTemplates)
 	r.Post("/requirements/channels/check-bulk", h.checkBotMembershipBulk)
-    r.Post("/requirements/holdton/check", h.checkHoldTON)
-    r.Post("/requirements/holdjetton/check", h.checkHoldJetton)
+	r.Post("/requirements/holdton/check", h.checkHoldTON)
+	r.Post("/requirements/holdjetton/check", h.checkHoldJetton)
+	r.Get("/jettons/:address/metadata", h.getJettonMetadata)
 }
 
 func (h *RequirementsHandlers) listTemplates(c *fiber.Ctx) error {
 	return c.JSON([]fiber.Map{
 		{"type": "subscription", "name": "Channel Subscription", "description": "User must be a member of specified channels"},
 		{"type": "boost", "name": "Channel Boost", "description": "User must have active boost in specified channels"},
-		{"type": "custom", "name": "Custom", "description": "User must fulfill custom requirement"},
 		{"type": "holdton", "name": "Hold TON", "description": "User must hold minimum TON balance"},
 		{"type": "holdjetton", "name": "Hold Jetton", "description": "User must hold minimum amount of specified jetton"},
+		{"type": "custom", "name": "Custom", "description": "User must fulfill custom requirement"},
 	})
 }
 
@@ -107,65 +110,94 @@ func (h *RequirementsHandlers) checkBotMembershipBulk(c *fiber.Ctx) error {
 
 // hold TON check
 type holdTonRequest struct {
-    TonMinBalanceNano int64 `json:"ton_min_balance_nano"`
+	TonMinBalanceNano int64 `json:"ton_min_balance_nano"`
 }
 
 func (h *RequirementsHandlers) checkHoldTON(c *fiber.Ctx) error {
-    if h.users == nil || h.ton == nil {
-        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "ton service not configured"})
-    }
-    // current user id from init-data
-    uidAny := c.Locals(mw.UserIdCtxParam)
-    userID, _ := uidAny.(int64)
-    if userID == 0 {
-        return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
-    }
-    var req holdTonRequest
-    if err := c.BodyParser(&req); err != nil {
-        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid json"})
-    }
-    u, err := h.users.GetByID(c.Context(), userID)
-    if err != nil || u == nil || u.WalletAddress == "" {
-        return c.JSON(fiber.Map{"ok": false, "error": "wallet not linked"})
-    }
-    bal, err := h.ton.GetAddressBalanceNano(c.Context(), u.WalletAddress)
-    if err != nil {
-        return c.JSON(fiber.Map{"ok": false, "error": err.Error()})
-    }
-    ok := req.TonMinBalanceNano <= 0 || bal >= req.TonMinBalanceNano
-    return c.JSON(fiber.Map{"ok": ok, "balance_nano": bal})
+	if h.users == nil || h.ton == nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "ton service not configured"})
+	}
+	// current user id from init-data
+	userID := mw.GetUserID(c)
+	if userID == 0 {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	var req holdTonRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid json"})
+	}
+	u, err := h.users.GetByID(c.Context(), userID)
+	if err != nil || u == nil || u.WalletAddress == "" {
+		return c.JSON(fiber.Map{"ok": false, "error": "wallet not linked"})
+	}
+	bal, err := h.ton.GetAddressBalanceNano(c.Context(), u.WalletAddress)
+	if err != nil {
+		return c.JSON(fiber.Map{"ok": false, "error": err.Error()})
+	}
+	ok := req.TonMinBalanceNano <= 0 || bal >= req.TonMinBalanceNano
+	return c.JSON(fiber.Map{"ok": ok, "balance_nano": bal})
 }
 
 // hold Jetton check
 type holdJettonRequest struct {
-    JettonAddress   string `json:"jetton_address"`
-    JettonMinAmount int64  `json:"jetton_min_amount"`
+	JettonAddress   string `json:"jetton_address"`
+	JettonMinAmount int64  `json:"jetton_min_amount"`
 }
 
 func (h *RequirementsHandlers) checkHoldJetton(c *fiber.Ctx) error {
-    if h.users == nil || h.ton == nil {
-        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "ton service not configured"})
-    }
-    uidAny := c.Locals(mw.UserIdCtxParam)
-    userID, _ := uidAny.(int64)
-    if userID == 0 {
-        return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
-    }
-    var req holdJettonRequest
-    if err := c.BodyParser(&req); err != nil {
-        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid json"})
-    }
-    if req.JettonAddress == "" || req.JettonMinAmount <= 0 {
-        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid jetton requirement"})
-    }
-    u, err := h.users.GetByID(c.Context(), userID)
-    if err != nil || u == nil || u.WalletAddress == "" {
-        return c.JSON(fiber.Map{"ok": false, "error": "wallet not linked"})
-    }
-    bal, err := h.ton.GetJettonBalanceNano(c.Context(), u.WalletAddress, req.JettonAddress)
-    if err != nil {
-        return c.JSON(fiber.Map{"ok": false, "error": err.Error()})
-    }
-    ok := bal >= req.JettonMinAmount
-    return c.JSON(fiber.Map{"ok": ok, "balance_nano": bal})
+	if h.users == nil || h.ton == nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "ton service not configured"})
+	}
+	userID := mw.GetUserID(c)
+	if userID == 0 {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	var req holdJettonRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid json"})
+	}
+	if req.JettonAddress == "" || req.JettonMinAmount <= 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid jetton requirement"})
+	}
+	u, err := h.users.GetByID(c.Context(), userID)
+	if err != nil || u == nil || u.WalletAddress == "" {
+		return c.JSON(fiber.Map{"ok": false, "error": "wallet not linked"})
+	}
+	bal, err := h.ton.GetJettonBalanceNano(c.Context(), u.WalletAddress, req.JettonAddress)
+	if err != nil {
+		return c.JSON(fiber.Map{"ok": false, "error": err.Error()})
+	}
+	// Convert human-entered jetton amount to smallest units using decimals
+	dec, derr := h.ton.GetJettonDecimals(c.Context(), req.JettonAddress)
+	if derr != nil {
+		return c.JSON(fiber.Map{"ok": false, "error": derr.Error()})
+	}
+	// big-int conversion: req.JettonMinAmount * 10^dec
+	reqSmall := new(big.Int).SetInt64(req.JettonMinAmount)
+	pow10 := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(dec)), nil)
+	reqSmall.Mul(reqSmall, pow10)
+	balBI := new(big.Int).SetInt64(bal)
+	ok := balBI.Cmp(reqSmall) >= 0
+	return c.JSON(fiber.Map{"ok": ok, "balance_nano": bal})
+}
+
+// getJettonMetadata returns jetton metadata (decimals, symbol, image) for a given jetton master address
+func (h *RequirementsHandlers) getJettonMetadata(c *fiber.Ctx) error {
+	if h.ton == nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "ton service not configured"})
+	}
+	addr := c.Params("address")
+	if addr == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing address"})
+	}
+	meta, err := h.ton.GetJettonMeta(c.Context(), addr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(fiber.Map{
+		"address":  addr,
+		"decimals": meta.Decimals,
+		"symbol":   meta.Symbol,
+		"image":    meta.Image,
+	})
 }

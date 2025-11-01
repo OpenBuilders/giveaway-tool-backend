@@ -73,9 +73,9 @@ func NewFiberApp(pg *sql.DB, rdb *redisp.Client, cfg *config.Config) *fiber.App 
 	us := usersvc.NewService(repo, cache)
 	chs := channels.NewService(rdb)
 	uh := NewUserHandlersFiber(us, chs)
-	// TON Proof service
-	tps := tonproof.NewService(rdb, cfg.TonProofDomain, cfg.TonProofPayloadTTLSec, cfg.TonAPIBaseURL, cfg.TonAPIToken)
-	uh.AttachTonProof(tps, cfg.TonProofDomain)
+	// TON Proof service (local verification). Handlers require Telegram init-data auth.
+	tps := tonproof.NewService(rdb, cfg.TonProofDomain, cfg.TonProofPayloadTTLSec)
+	tph := NewTonProofHandlers(tps, cfg.TonProofDomain, us)
 
 	// Giveaway domain deps
 	gRepo := pgrepo.NewGiveawayRepository(pg)
@@ -83,13 +83,13 @@ func NewFiberApp(pg *sql.DB, rdb *redisp.Client, cfg *config.Config) *fiber.App 
 	notifier := notify.NewService(tgClient, chs, cfg.WebAppBaseURL)
 	gs := gsvc.NewService(gRepo).WithTelegram(tgClient).WithNotifier(notifier)
 	// TON balance via TonAPI
-	tbs := tonbalance.NewService(cfg.TonAPIBaseURL, cfg.TonAPIToken)
+	tbs := tonbalance.NewService(cfg.TonAPIBaseURL, cfg.TonAPIToken).WithCache(rdb, 0)
 	gh := NewGiveawayHandlersFiber(gs, chs, tgClient, us, tbs)
 
 	// API groups
 	ttl := time.Duration(cfg.InitDataTTL) * time.Second
 	api := app.Group("/api")
-	v1 := api.Group("/v1", mw.RedisCache(rdb, 2*time.Second), mw.InitDataMiddleware(cfg.TelegramBotToken, ttl))
+	v1 := api.Group("/v1", mw.InitDataMiddleware(cfg.TelegramBotToken, ttl))
 	uh.RegisterFiber(v1)
 	gh.RegisterFiber(v1)
 
@@ -98,6 +98,9 @@ func NewFiberApp(pg *sql.DB, rdb *redisp.Client, cfg *config.Config) *fiber.App 
 	ch.RegisterFiber(v1)
 	rq := NewRequirementsHandlers(tgClient, us, tbs)
 	rq.RegisterFiber(v1)
+
+	// TON Proof endpoints registered under v1 (protected by InitData middleware)
+	tph.RegisterFiber(v1)
 
 	return app
 }

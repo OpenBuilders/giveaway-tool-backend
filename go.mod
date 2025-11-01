@@ -10,6 +10,7 @@ require (
 	github.com/pressly/goose/v3 v3.26.0
 	github.com/redis/go-redis/v9 v9.14.0
 	github.com/telegram-mini-apps/init-data-golang v1.5.0
+	github.com/tonkeeper/tongo v1.9.9
 )
 
 require (
@@ -23,10 +24,12 @@ require (
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/rivo/uniseg v0.2.0 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
+	github.com/snksoft/crc v1.1.0 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.51.0 // indirect
 	github.com/valyala/tcplisten v1.0.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
+	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
 	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/sys v0.34.0 // indirect
 )

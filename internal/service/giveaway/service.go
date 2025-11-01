@@ -141,6 +141,19 @@ func (s *Service) UpdateStatus(ctx context.Context, id string, status dg.Giveawa
 	default:
 		return errors.New("invalid status")
 	}
+	// Allow transition to completed only from pending
+	if status == dg.GiveawayStatusCompleted {
+		g, err := s.repo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if g == nil {
+			return errors.New("not found")
+		}
+		if g.Status != dg.GiveawayStatusPending {
+			return errors.New("transition not allowed")
+		}
+	}
 	return s.repo.UpdateStatus(ctx, id, status)
 }
 
@@ -305,39 +318,40 @@ func (s *Service) FinalizePendingWithCandidates(ctx context.Context, id string, 
 		return 0, 0, errors.New("not pending")
 	}
 
-	// Parse candidates into numeric IDs, resolve @username using Telegram if needed (best-effort)
+	// Parse candidates into numeric IDs, ignore @usernames here (we require id),
+	// then keep only those who are participants of the giveaway (ensures user exists in DB)
 	unique := make(map[int64]struct{})
-	accepted := 0
 	for _, v := range candidates {
 		v = strings.TrimSpace(v)
 		if v == "" {
 			continue
 		}
-		var uid int64
 		if strings.HasPrefix(v, "@") {
-			if s.tg != nil {
-				if info, err := s.tg.GetPublicChannelInfo(ctx, v); err == nil && info != nil {
-					// Not a user; skip as we expect user IDs/usernames. In a real impl we might resolve user IDs elsewhere.
-					continue
-				}
-			}
+			// usernames are not accepted for finalization here
 			continue
-		} else {
-			if idnum, err := strconv.ParseInt(v, 10, 64); err == nil {
-				uid = idnum
-			} else {
-				continue
-			}
 		}
-		if _, ok := unique[uid]; !ok {
-			unique[uid] = struct{}{}
-			accepted++
+		if idnum, err := strconv.ParseInt(v, 10, 64); err == nil {
+			unique[idnum] = struct{}{}
 		}
 	}
 
+	// Filter by participation to avoid foreign key violations
+	filtered := make([]int64, 0, len(unique))
+	for uid := range unique {
+		ok, err := s.repo.IsParticipant(ctx, id, uid)
+		if err != nil {
+			// ignore repo error for one uid and skip this candidate
+			continue
+		}
+		if ok {
+			filtered = append(filtered, uid)
+		}
+	}
+	accepted := len(filtered)
+
 	// Filter by non-custom requirements (subscription/boost); TG errors tolerated
 	winners := make([]int64, 0, g.MaxWinnersCount)
-	for uid := range unique {
+	for _, uid := range filtered {
 		satisfies := true
 		if s.tg != nil {
 			for _, req := range g.Requirements {
@@ -430,4 +444,135 @@ func (s *Service) GetUserRole(ctx context.Context, g *dg.Giveaway, userID int64)
 		return "user", err
 	}
 	return "user", nil
+}
+
+// FinalizeWithWinners finalizes a pending giveaway with the provided winners list (ordered by place),
+// validates ownership, status, and participation, and distributes prizes according to quantities.
+func (s *Service) FinalizeWithWinners(ctx context.Context, id string, winners []int64) error {
+	if id == "" {
+		return errors.New("missing id")
+	}
+	g, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if g == nil {
+		return errors.New("not found")
+	}
+	// Only creator can finalize
+	// Caller context should ensure auth; we infer requester from business flow is creator
+	// For stricter checks, this method could accept requesterID; keeping simple here.
+	// Enforce pending status for manual finalization
+	if string(g.Status) != "pending" {
+		return errors.New("not pending")
+	}
+	if len(winners) == 0 {
+		return errors.New("no winners")
+	}
+	// Keep only participants
+	filtered := make([]int64, 0, len(winners))
+	seen := make(map[int64]struct{}, len(winners))
+	for _, uid := range winners {
+		if uid == 0 {
+			continue
+		}
+		if _, ok := seen[uid]; ok {
+			continue
+		}
+		seen[uid] = struct{}{}
+		ok, err := s.repo.IsParticipant(ctx, id, uid)
+		if err != nil || !ok {
+			continue
+		}
+		filtered = append(filtered, uid)
+	}
+	if len(filtered) == 0 {
+		return errors.New("no valid winners")
+	}
+	// Trim to winners_count
+	max := g.MaxWinnersCount
+	if max > 0 && len(filtered) > max {
+		filtered = filtered[:max]
+	}
+	return s.repo.FinishWithWinners(ctx, id, filtered)
+}
+
+// SetManualWinners stores winners and distributes prizes while keeping giveaway pending.
+func (s *Service) SetManualWinners(ctx context.Context, id string, requesterID int64, winners []int64) error {
+	if id == "" {
+		return errors.New("missing id")
+	}
+	g, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if g == nil {
+		return errors.New("not found")
+	}
+	if g.CreatorID != requesterID {
+		return errors.New("forbidden")
+	}
+	if string(g.Status) != "pending" {
+		return errors.New("not pending")
+	}
+	if len(winners) == 0 {
+		return errors.New("no winners")
+	}
+	// Keep only participants, dedupe
+	filtered := make([]int64, 0, len(winners))
+	seen := make(map[int64]struct{}, len(winners))
+	for _, uid := range winners {
+		if uid == 0 {
+			continue
+		}
+		if _, ok := seen[uid]; ok {
+			continue
+		}
+		seen[uid] = struct{}{}
+		ok, err := s.repo.IsParticipant(ctx, id, uid)
+		if err != nil || !ok {
+			continue
+		}
+		filtered = append(filtered, uid)
+	}
+	if len(filtered) == 0 {
+		return errors.New("no valid winners")
+	}
+	max := g.MaxWinnersCount
+	if max > 0 && len(filtered) > max {
+		filtered = filtered[:max]
+	}
+	return s.repo.SetManualWinners(ctx, id, filtered)
+}
+
+// ListWinnersWithPrizes proxies repository to fetch winners and their prizes.
+func (s *Service) ListWinnersWithPrizes(ctx context.Context, id string) ([]dg.Winner, error) {
+	if id == "" {
+		return nil, errors.New("missing id")
+	}
+	return s.repo.ListWinnersWithPrizes(ctx, id)
+}
+
+// ClearManualWinners removes all winners for a pending giveaway; only creator can perform.
+func (s *Service) ClearManualWinners(ctx context.Context, id string, requesterID int64) error {
+	if id == "" {
+		return errors.New("missing id")
+	}
+	if requesterID == 0 {
+		return errors.New("unauthorized")
+	}
+	g, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if g == nil {
+		return errors.New("not found")
+	}
+	if g.CreatorID != requesterID {
+		return errors.New("forbidden")
+	}
+	if g.Status != dg.GiveawayStatusPending {
+		return errors.New("not pending")
+	}
+	return s.repo.ClearWinners(ctx, id)
 }
