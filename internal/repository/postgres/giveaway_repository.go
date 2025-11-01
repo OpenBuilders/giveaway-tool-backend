@@ -288,6 +288,20 @@ func (r *GiveawayRepository) ListByCreator(ctx context.Context, creatorID int64,
 		if err := rows.Scan(&g.ID, &g.CreatorID, &g.Title, &g.Description, &g.StartedAt, &g.EndsAt, &g.Duration, &g.MaxWinnersCount, &g.Status, &g.CreatedAt, &g.UpdatedAt); err != nil {
 			return nil, err
 		}
+		// Load sponsors for each giveaway (same as in GetByID)
+		const qs = `SELECT username, url, title, channel_id, avatar_url FROM giveaway_sponsors WHERE giveaway_id=$1`
+		srows, err := r.db.QueryContext(ctx, qs, g.ID)
+		if err == nil {
+			for srows.Next() {
+				var s dg.ChannelInfo
+				if err := srows.Scan(&s.Username, &s.URL, &s.Title, &s.ID, &s.AvatarURL); err != nil {
+					srows.Close()
+					return nil, err
+				}
+				g.Sponsors = append(g.Sponsors, s)
+			}
+			srows.Close()
+		}
 		out = append(out, g)
 	}
 	return out, rows.Err()
@@ -904,6 +918,20 @@ func (r *GiveawayRepository) ListActive(ctx context.Context, limit, offset, minP
 		if err := rows.Scan(&g.ID, &g.CreatorID, &g.Title, &g.Description, &g.StartedAt, &g.EndsAt,
 			&g.Duration, &g.MaxWinnersCount, &g.Status, &g.CreatedAt, &g.UpdatedAt, &g.ParticipantsCount); err != nil {
 			return nil, err
+		}
+		// Load sponsors
+		const qs = `SELECT username, url, title, channel_id, avatar_url FROM giveaway_sponsors WHERE giveaway_id=$1`
+		srows, err := r.db.QueryContext(ctx, qs, g.ID)
+		if err == nil {
+			for srows.Next() {
+				var s dg.ChannelInfo
+				if err := srows.Scan(&s.Username, &s.URL, &s.Title, &s.ID, &s.AvatarURL); err != nil {
+					srows.Close()
+					return nil, err
+				}
+				g.Sponsors = append(g.Sponsors, s)
+			}
+			srows.Close()
 		}
 		out = append(out, g)
 	}

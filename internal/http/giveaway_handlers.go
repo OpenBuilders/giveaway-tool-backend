@@ -193,26 +193,12 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 		})
 	}
 
-	// Map sponsors: resolve full info by id using Telegram API, fallback to Redis cache
+	// Map sponsors: берем из Redis (channels service) по channel_id и сохраняем полные данные в БД
 	for _, s := range req.Sponsors {
 		if s.ID == 0 {
 			g.Sponsors = append(g.Sponsors, dg.ChannelInfo{ID: s.ID})
 			continue
 		}
-		// Try Telegram API by ID
-		if h.telegram != nil {
-			if info, err := h.telegram.GetPublicChannelInfoByID(c.Context(), s.ID); err == nil && info != nil {
-				g.Sponsors = append(g.Sponsors, dg.ChannelInfo{
-					ID:        info.ID,
-					Title:     info.Title,
-					Username:  info.Username,
-					URL:       info.ChannelURL,
-					AvatarURL: info.AvatarURL,
-				})
-				continue
-			}
-		}
-		// Fallback to Redis cache
 		if h.channels != nil {
 			ch, _ := h.channels.GetByID(c.Context(), s.ID)
 			if ch != nil {
@@ -220,10 +206,11 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 				if ch.Username != "" {
 					url = "https://t.me/" + ch.Username
 				}
-				g.Sponsors = append(g.Sponsors, dg.ChannelInfo{ID: ch.ID, Title: ch.Title, Username: ch.Username, URL: url})
+				g.Sponsors = append(g.Sponsors, dg.ChannelInfo{ID: ch.ID, Title: ch.Title, Username: ch.Username, URL: url, AvatarURL: ch.AvatarURL})
 				continue
 			}
 		}
+		// Если в Redis нет — сохраняем хотя бы id, остальное можно дозаполнить позже
 		g.Sponsors = append(g.Sponsors, dg.ChannelInfo{ID: s.ID})
 	}
 
