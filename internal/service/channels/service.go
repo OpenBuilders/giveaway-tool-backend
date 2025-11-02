@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	rplatform "github.com/open-builders/giveaway-backend/internal/platform/redis"
+	tgutils "github.com/open-builders/giveaway-backend/internal/utils/telegram"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -34,7 +35,7 @@ func (s *Service) GetByID(ctx context.Context, id int64) (*Channel, error) {
 	username, _ := s.rdb.Get(ctx, fmt.Sprintf("channel:%d:username", id)).Result()
 	urlVal, _ := s.rdb.Get(ctx, fmt.Sprintf("channel:%d:url", id)).Result()
 	photoSmall, _ := s.rdb.Get(ctx, fmt.Sprintf("channel:%d:photo_small_url", id)).Result()
-	avatar := buildAvatarURL(username, title)
+	avatar := buildAvatarURL(username, title, id)
 	return &Channel{ID: id, Title: title, Username: username, URL: urlVal, AvatarURL: avatar, PhotoSmallURL: photoSmall}, nil
 }
 
@@ -83,16 +84,16 @@ func (s *Service) ListUserChannels(ctx context.Context, userID int64) ([]Channel
 		username, _ := usernameCmds[i].Result()
 		urlVal, _ := urlCmds[i].Result()
 		photoSmall, _ := photoSmallCmds[i].Result()
-		avatar := buildAvatarURL(username, title)
+		avatar := buildAvatarURL(username, title, id)
 		out = append(out, Channel{ID: id, Title: title, Username: username, URL: urlVal, AvatarURL: avatar, PhotoSmallURL: photoSmall})
 	}
 	return out, nil
 }
 
 // buildAvatarURL prefers Telegram's public avatar URL by username; falls back to placeholder by title.
-func buildAvatarURL(username, title string) string {
-	if username != "" {
-		return fmt.Sprintf("https://t.me/i/userpic/160/%s.jpg", username)
+func buildAvatarURL(username, title string, id int64) string {
+	if avatarURL := tgutils.BuildAvatarURL(strconv.FormatInt(id, 10)); avatarURL != "" {
+		return avatarURL
 	}
 	if title == "" {
 		return ""

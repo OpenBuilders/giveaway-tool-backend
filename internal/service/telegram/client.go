@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	tgutils "github.com/open-builders/giveaway-backend/internal/utils/telegram"
 )
 
 // Client provides minimal Telegram API utilities used by the backend.
@@ -30,10 +32,18 @@ func NewClientFromEnv() *Client {
 }
 
 type chat struct {
-	ID       int64  `json:"id"`
-	Type     string `json:"type"`
-	Title    string `json:"title"`
-	Username string `json:"username"`
+	ID       int64      `json:"id"`
+	Type     string     `json:"type"`
+	Title    string     `json:"title"`
+	Username string     `json:"username"`
+	Photo    *chatPhoto `json:"photo,omitempty"`
+}
+
+type chatPhoto struct {
+	SmallFileID       string `json:"small_file_id"`
+	SmallFileUniqueID string `json:"small_file_unique_id"`
+	BigFileID         string `json:"big_file_id"`
+	BigFileUniqueID   string `json:"big_file_unique_id"`
 }
 
 type tgResponse[T any] struct {
@@ -72,7 +82,7 @@ func (c *Client) GetPublicChannelInfo(ctx context.Context, username string) (*Pu
 		return nil, fmt.Errorf("telegram API error: %s", result.Description)
 	}
 
-	avatarURL := fmt.Sprintf("https://t.me/i/userpic/160/%s.jpg", username)
+	avatarURL := tgutils.BuildAvatarURL(strconv.FormatInt(result.Result.ID, 10))
 	// best-effort HEAD to check existence
 	req, _ := http.NewRequestWithContext(ctx, http.MethodHead, avatarURL, nil)
 	resp, err := c.httpClient.Do(req)
@@ -111,7 +121,7 @@ func (c *Client) GetPublicChannelInfoByID(ctx context.Context, id int64) (*Publi
 	username := result.Result.Username
 	var avatarURL string
 	if username != "" {
-		avatarURL = fmt.Sprintf("https://t.me/i/userpic/160/%s.jpg", username)
+		avatarURL = tgutils.BuildAvatarURL(strconv.FormatInt(result.Result.ID, 10))
 		req, _ := http.NewRequestWithContext(ctx, http.MethodHead, avatarURL, nil)
 		resp, err := c.httpClient.Do(req)
 		if err == nil {
@@ -162,6 +172,50 @@ func (c *Client) makeRequest(ctx context.Context, method, endpoint string, data 
 	defer resp.Body.Close()
 	dec := json.NewDecoder(resp.Body)
 	return dec.Decode(out)
+}
+
+// BuildFileURL returns the absolute Bot API file URL for a given file_path.
+func (c *Client) BuildFileURL(filePath string) string {
+	return fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", c.token, filePath)
+}
+
+// GetChatRaw wraps getChat and returns raw chat payload for either @username or numeric id.
+func (c *Client) GetChatRaw(ctx context.Context, chatRef string) (*chat, error) {
+	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/getChat", c.token)
+	params := url.Values{"chat_id": {chatRef}}
+	var result tgResponse[chat]
+	if err := c.makeRequest(ctx, http.MethodGet, endpoint, params, &result); err != nil {
+		return nil, fmt.Errorf("getChat: %w", err)
+	}
+	if !result.Ok {
+		return nil, fmt.Errorf("telegram API error: %s", result.Description)
+	}
+	return &result.Result, nil
+}
+
+// GetFilePath wraps getFile and returns the file_path for a given file_id.
+func (c *Client) GetFilePath(ctx context.Context, fileID string) (string, error) {
+	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/getFile", c.token)
+	params := url.Values{"file_id": {fileID}}
+	var result struct {
+		Ok     bool   `json:"ok"`
+		Error  string `json:"description"`
+		Result struct {
+			FileID   string `json:"file_id"`
+			FileSize int64  `json:"file_size"`
+			FilePath string `json:"file_path"`
+		} `json:"result"`
+	}
+	if err := c.makeRequest(ctx, http.MethodGet, endpoint, params, &result); err != nil {
+		return "", fmt.Errorf("getFile: %w", err)
+	}
+	if !result.Ok {
+		if result.Error == "" {
+			result.Error = "telegram API error"
+		}
+		return "", fmt.Errorf(result.Error)
+	}
+	return result.Result.FilePath, nil
 }
 
 // SendMessage sends a message to a chat/channel with optional inline button using Telegram Bot API.

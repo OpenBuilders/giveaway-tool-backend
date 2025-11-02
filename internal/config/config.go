@@ -43,18 +43,10 @@ func Load() (*Config, error) {
 		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "*"),
 		TelegramBotToken:   getEnv("TELEGRAM_BOT_TOKEN", ""),
 		TonProofDomain:     getEnv("TON_PROOF_DOMAIN", ""),
-<<<<<<< HEAD
 		TonAPIBaseURL:      getEnv("TONAPI_BASE_URL", "https://tonapi.io"),
 		TonAPIToken:        getEnv("TONAPI_TOKEN", ""),
 		TonLiteConfigURL:   getEnv("TON_LITE_CONFIG_URL", "https://ton.org/global-config.json"),
 		WebAppBaseURL:      getEnv("WEBAPP_BASE_URL", ""),
-=======
-		// Default TTL for payloads (seconds)
-		// Value can be overridden via TON_PROOF_PAYLOAD_TTL_SEC
-		TonAPIBaseURL:    getEnv("TONAPI_BASE_URL", "https://tonapi.io"),
-		TonAPIToken:      getEnv("TONAPI_TOKEN", ""),
-		TonLiteConfigURL: getEnv("TON_LITE_CONFIG_URL", "https://ton.org/global-config.json"),
->>>>>>> 7d5397999cd8fe6598b761446de9f38576821182
 	}
 	redisDBStr := getEnv("REDIS_DB", "0")
 	dbNum, err := strconv.Atoi(redisDBStr)

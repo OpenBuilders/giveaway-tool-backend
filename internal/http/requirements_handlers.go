@@ -1,13 +1,14 @@
 package http
 
 import (
-	"math/big"
-
 	"github.com/gofiber/fiber/v2"
 	mw "github.com/open-builders/giveaway-backend/internal/http/middleware"
 	tgsvc "github.com/open-builders/giveaway-backend/internal/service/telegram"
 	tonb "github.com/open-builders/giveaway-backend/internal/service/tonbalance"
 	usersvc "github.com/open-builders/giveaway-backend/internal/service/user"
+	tgutils "github.com/open-builders/giveaway-backend/internal/utils/telegram"
+	"math/big"
+	"strconv"
 )
 
 // RequirementsHandlers exposes available requirement types for the client.
@@ -40,7 +41,8 @@ func (h *RequirementsHandlers) listTemplates(c *fiber.Ctx) error {
 }
 
 type checkBulkRequest struct {
-	Usernames []string `json:"usernames"`
+	Usernames  []string `json:"usernames,omitempty"`
+	ChannelIDs []string `json:"channel_ids,omitempty"`
 }
 
 type checkBulkItem struct {
@@ -48,10 +50,11 @@ type checkBulkItem struct {
 	Ok       bool   `json:"ok"`
 	Error    string `json:"error,omitempty"`
 	Channel  struct {
-		ID       int64  `json:"id"`
-		Type     string `json:"type"`
-		Title    string `json:"title"`
-		Username string `json:"username"`
+		ID        int64  `json:"id"`
+		Type      string `json:"type"`
+		Title     string `json:"title"`
+		Username  string `json:"username"`
+		AvatarURL string `json:"avatar_url"`
 	} `json:"channel"`
 	BotStatus struct {
 		Status          string `json:"status"`
@@ -67,10 +70,10 @@ func (h *RequirementsHandlers) checkBotMembershipBulk(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid json"})
 	}
-	if len(req.Usernames) == 0 {
+	if len(req.Usernames) == 0 && len(req.ChannelIDs) == 0 {
 		return c.JSON([]checkBulkItem{})
 	}
-	out := make([]checkBulkItem, 0, len(req.Usernames))
+	out := make([]checkBulkItem, 0, len(req.Usernames)+len(req.ChannelIDs))
 	for _, uname := range req.Usernames {
 		if uname == "" {
 			out = append(out, checkBulkItem{Username: uname, Ok: false, Error: "empty username"})
@@ -89,6 +92,7 @@ func (h *RequirementsHandlers) checkBotMembershipBulk(c *fiber.Ctx) error {
 			item.Channel.Type = ch.Type
 			item.Channel.Title = ch.Title
 			item.Channel.Username = ch.Username
+			item.Channel.AvatarURL = tgutils.BuildAvatarURL(strconv.FormatInt(ch.ID, 10))
 		}
 		// Check membership
 		ok, err := h.telegram.IsBotMember(c.Context(), chat)
@@ -100,6 +104,42 @@ func (h *RequirementsHandlers) checkBotMembershipBulk(c *fiber.Ctx) error {
 		}
 		// Bot status details
 		if status, can, err := h.telegram.GetBotMemberStatus(c.Context(), chat); err == nil {
+			item.BotStatus.Status = status
+			item.BotStatus.CanCheckMembers = can
+		}
+		out = append(out, item)
+	}
+	for _, channelID := range req.ChannelIDs {
+		intID, err := strconv.ParseInt(channelID, 10, 64)
+		if err != nil {
+			out = append(out, checkBulkItem{Channel: struct {
+				ID        int64  `json:"id"`
+				Type      string `json:"type"`
+				Title     string `json:"title"`
+				Username  string `json:"username"`
+				AvatarURL string `json:"avatar_url"`
+			}{ID: intID, Type: "channel", Title: "Channel", Username: "Channel"}, Ok: false, Error: err.Error()})
+			continue
+		}
+		item := checkBulkItem{Username: ""}
+
+		if ch, errInfo := h.telegram.GetPublicChannelInfoByID(c.Context(), intID); errInfo == nil && ch != nil {
+			item.Channel.ID = ch.ID
+			item.Channel.Type = ch.Type
+			item.Channel.Title = ch.Title
+			item.Channel.Username = ch.Username
+			item.Channel.AvatarURL = tgutils.BuildAvatarURL(strconv.FormatInt(ch.ID, 10))
+		}
+		// Check membership
+		ok, err := h.telegram.IsBotMember(c.Context(), channelID)
+		if err != nil {
+			item.Ok = false
+			item.Error = err.Error()
+		} else {
+			item.Ok = ok
+		}
+		// Bot status details
+		if status, can, err := h.telegram.GetBotMemberStatus(c.Context(), channelID); err == nil {
 			item.BotStatus.Status = status
 			item.BotStatus.CanCheckMembers = can
 		}

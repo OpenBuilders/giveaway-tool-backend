@@ -18,6 +18,7 @@ import (
 	tgsvc "github.com/open-builders/giveaway-backend/internal/service/telegram"
 	tonb "github.com/open-builders/giveaway-backend/internal/service/tonbalance"
 	usersvc "github.com/open-builders/giveaway-backend/internal/service/user"
+	tgutils "github.com/open-builders/giveaway-backend/internal/utils/telegram"
 )
 
 // GiveawayHandlersFiber provides Fiber endpoints for giveaways.
@@ -223,6 +224,7 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 
 func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 	id := c.Params("id")
+	fmt.Println("id", id)
 	g, err := h.service.GetByID(c.Context(), id)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
@@ -474,10 +476,7 @@ func (h *GiveawayHandlersFiber) uploadManualCandidates(c *fiber.Ctx) error {
 						}
 						seen[usr.ID] = struct{}{}
 						fullName := strings.TrimSpace(strings.TrimSpace(usr.FirstName + " " + usr.LastName))
-						avatar := ""
-						if usr.Username != "" {
-							avatar = "https://t.me/i/userpic/160/" + usr.Username + ".jpg"
-						}
+						avatar := tgutils.BuildAvatarURL(strconv.FormatInt(usr.ID, 10))
 						out = append(out, previewItem{UserID: usr.ID, Username: usr.Username, Name: fullName, AvatarURL: avatar, Source: "username"})
 					}
 				}
@@ -499,9 +498,7 @@ func (h *GiveawayHandlersFiber) uploadManualCandidates(c *fiber.Ctx) error {
 					seen[uid] = struct{}{}
 					username = usr.Username
 					name = strings.TrimSpace(strings.TrimSpace(usr.FirstName + " " + usr.LastName))
-					if username != "" {
-						avatar = "https://t.me/i/userpic/160/" + username + ".jpg"
-					}
+					avatar = tgutils.BuildAvatarURL(strconv.FormatInt(uid, 10))
 					out = append(out, previewItem{UserID: uid, Username: username, Name: name, AvatarURL: avatar, Source: "id"})
 				}
 			}
@@ -619,9 +616,7 @@ func (h *GiveawayHandlersFiber) listWinnersWithPrizes(c *fiber.Ctx) error {
 			if usr, uerr := h.users.GetByID(c.Context(), w.UserID); uerr == nil && usr != nil {
 				username = usr.Username
 				name = strings.TrimSpace(strings.TrimSpace(usr.FirstName + " " + usr.LastName))
-				if username != "" {
-					avatar = "https://t.me/i/userpic/160/" + username + ".jpg"
-				}
+				avatar = tgutils.BuildAvatarURL(strconv.FormatInt(w.UserID, 10))
 			}
 		}
 		resp = append(resp, respItem{

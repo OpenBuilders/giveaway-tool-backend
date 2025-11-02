@@ -137,7 +137,7 @@ func (r *GiveawayRepository) GetByID(ctx context.Context, id string) (*dg.Giveaw
 	}
 
 	// Sponsors
-	const qs = `SELECT username, url, title, channel_id, avatar_url FROM giveaway_sponsors WHERE giveaway_id=$1`
+	const qs = `SELECT username, url, title, channel_id, COALESCE(avatar_url,'') AS avatar_url FROM giveaway_sponsors WHERE giveaway_id=$1`
 	srows, err := r.db.QueryContext(ctx, qs, id)
 	if err == nil {
 		defer srows.Close()
@@ -289,7 +289,7 @@ func (r *GiveawayRepository) ListByCreator(ctx context.Context, creatorID int64,
 			return nil, err
 		}
 		// Load sponsors for each giveaway (same as in GetByID)
-		const qs = `SELECT username, url, title, channel_id, avatar_url FROM giveaway_sponsors WHERE giveaway_id=$1`
+		const qs = `SELECT username, url, title, channel_id, COALESCE(avatar_url,'') AS avatar_url FROM giveaway_sponsors WHERE giveaway_id=$1`
 		srows, err := r.db.QueryContext(ctx, qs, g.ID)
 		if err == nil {
 			for srows.Next() {
@@ -920,7 +920,7 @@ func (r *GiveawayRepository) ListActive(ctx context.Context, limit, offset, minP
 			return nil, err
 		}
 		// Load sponsors
-		const qs = `SELECT username, url, title, channel_id, avatar_url FROM giveaway_sponsors WHERE giveaway_id=$1`
+		const qs = `SELECT username, url, title, channel_id, COALESCE(avatar_url,'') AS avatar_url FROM giveaway_sponsors WHERE giveaway_id=$1`
 		srows, err := r.db.QueryContext(ctx, qs, g.ID)
 		if err == nil {
 			for srows.Next() {

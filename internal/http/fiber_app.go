@@ -90,17 +90,25 @@ func NewFiberApp(pg *sql.DB, rdb *redisp.Client, cfg *config.Config) *fiber.App 
 	ttl := time.Duration(cfg.InitDataTTL) * time.Second
 	api := app.Group("/api")
 	v1 := api.Group("/v1", mw.InitDataMiddleware(cfg.TelegramBotToken, ttl))
+
+	// Protected endpoints (require InitData middleware)
 	uh.RegisterFiber(v1)
 	gh.RegisterFiber(v1)
+	tph.RegisterFiber(v1)
 
-	// Telegram channels endpoints (public; no init-data required)
-	ch := NewChannelHandlers(tgClient)
-	ch.RegisterFiber(v1)
+	// Channel handlers - split between protected and public
+	avatarCache := rcache.NewChannelAvatarCache(rdb, 24*time.Hour)
+	// Short-lived cache for getChat photo identifiers to reduce Telegram calls
+	photoCache := rcache.NewChannelPhotoCache(rdb, 10*time.Minute)
+	ch := NewChannelHandlers(tgClient, avatarCache, photoCache)
+	ch.RegisterFiber(v1) // Protected: info, membership, boost
+
 	rq := NewRequirementsHandlers(tgClient, us, tbs)
 	rq.RegisterFiber(v1)
 
-	// TON Proof endpoints registered under v1 (protected by InitData middleware)
-	tph.RegisterFiber(v1)
+	// Public endpoints (no init-data required)
+	v1public := api.Group("/public")
+	ch.RegisterPublicFiber(v1public) // Public: avatar only
 
 	return app
 }

@@ -13,6 +13,7 @@ import (
 	repo "github.com/open-builders/giveaway-backend/internal/repository/postgres"
 	notify "github.com/open-builders/giveaway-backend/internal/service/notifications"
 	tg "github.com/open-builders/giveaway-backend/internal/service/telegram"
+	tgutils "github.com/open-builders/giveaway-backend/internal/utils/telegram"
 )
 
 // Service contains business rules for giveaways.
@@ -103,12 +104,13 @@ func (s *Service) GetByID(ctx context.Context, id string) (*dg.Giveaway, error) 
 				if key == "" && req.ChannelID != 0 {
 					key = fmt.Sprintf("%d", req.ChannelID)
 				}
+
 				if key != "" {
 					info, err := s.tg.GetPublicChannelInfo(ctx, key)
 					if err == nil && info != nil {
 						req.ChannelTitle = info.Title
 						req.ChannelURL = info.ChannelURL
-						req.AvatarURL = info.AvatarURL
+						req.AvatarURL = tgutils.BuildAvatarURL(strconv.FormatInt(info.ID, 10))
 						if req.ChannelID == 0 {
 							req.ChannelID = info.ID
 						}
@@ -116,6 +118,8 @@ func (s *Service) GetByID(ctx context.Context, id string) (*dg.Giveaway, error) 
 							req.ChannelUsername = info.Username
 						}
 					}
+
+					req.AvatarURL = tgutils.BuildAvatarURL(key)
 				}
 			}
 		}
