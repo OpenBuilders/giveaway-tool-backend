@@ -94,5 +94,5 @@ func getEnv(key, def string) string {
 
 // GetPublicBaseURL returns the public base URL from environment with a sane default.
 func GetPublicBaseURL() string {
-	return getEnv("PUBLIC_BASE_URL", "http://localhost:8080")
+	return getEnv("PUBLIC_BASE_URL", "https://dev-api.giveaway.tools.tg")
 }
