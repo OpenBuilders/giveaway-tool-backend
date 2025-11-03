@@ -1,13 +1,18 @@
 package telegram
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
 
-// BuildAvatarURL constructs the Telegram avatar URL for a given username.
+	"github.com/open-builders/giveaway-backend/internal/config"
+)
+
+// BuildAvatarURL constructs the public avatar URL using config's PublicBaseURL.
 // Returns an empty string if username is empty.
 func BuildAvatarURL(username string) string {
 	if username == "" {
 		return ""
 	}
-	// return fmt.Sprintf("https://t.me/i/userpic/160/%s.jpg", username)
-	return fmt.Sprintf("http://localhost:8080/api/public/channels/%s/avatar", username)
+	baseURL := strings.TrimRight(config.GetPublicBaseURL(), "/")
+	return fmt.Sprintf("%s/api/public/channels/%s/avatar", baseURL, username)
 }

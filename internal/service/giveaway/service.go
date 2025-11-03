@@ -14,6 +14,7 @@ import (
 	notify "github.com/open-builders/giveaway-backend/internal/service/notifications"
 	tg "github.com/open-builders/giveaway-backend/internal/service/telegram"
 	tgutils "github.com/open-builders/giveaway-backend/internal/utils/telegram"
+	channelsvc "github.com/open-builders/giveaway-backend/internal/service/channels"
 )
 
 // Service contains business rules for giveaways.
@@ -21,9 +22,10 @@ type Service struct {
 	repo *repo.GiveawayRepository
 	tg   *tg.Client
 	ntf  *notify.Service
+	channels *channelsvc.Service
 }
 
-func NewService(r *repo.GiveawayRepository) *Service { return &Service{repo: r} }
+func NewService(r *repo.GiveawayRepository, chs *channelsvc.Service) *Service { return &Service{repo: r, channels: chs} }
 
 // WithTelegram injects a Telegram client for requirements checks and enrichment.
 func (s *Service) WithTelegram(client *tg.Client) *Service { s.tg = client; return s }
@@ -106,17 +108,26 @@ func (s *Service) GetByID(ctx context.Context, id string) (*dg.Giveaway, error) 
 				}
 
 				if key != "" {
-					info, err := s.tg.GetPublicChannelInfo(ctx, key)
-					if err == nil && info != nil {
-						req.ChannelTitle = info.Title
-						req.ChannelURL = info.ChannelURL
-						req.AvatarURL = tgutils.BuildAvatarURL(strconv.FormatInt(info.ID, 10))
-						if req.ChannelID == 0 {
-							req.ChannelID = info.ID
-						}
-						if req.ChannelUsername == "" {
-							req.ChannelUsername = info.Username
-						}
+					// info, err := s.tg.GetPublicChannelInfo(ctx, key)
+					// if err == nil && info != nil {
+					// 	req.ChannelTitle = info.Title
+					// 	req.ChannelURL = info.ChannelURL
+					// 	req.AvatarURL = tgutils.BuildAvatarURL(strconv.FormatInt(info.ID, 10))
+					// 	if req.ChannelID == 0 {
+					// 		req.ChannelID = info.ID
+					// 	}
+					// 	if req.ChannelUsername == "" {
+					// 		req.ChannelUsername = info.Username
+					// 	}
+					// }
+
+					ch, err := s.channels.GetByID(ctx, req.ChannelID)
+					if err == nil && ch != nil {
+						req.ChannelTitle = ch.Title
+						req.ChannelURL = ch.URL
+						req.AvatarURL = ch.AvatarURL
+						req.ChannelUsername = ch.Username
+						req.ChannelID = ch.ID
 					}
 
 					req.AvatarURL = tgutils.BuildAvatarURL(key)

@@ -60,11 +60,11 @@ func main() {
 	app := apphttp.NewFiberApp(pg, rdb, cfg)
 
 	// Start background worker for finishing expired giveaways
+	chs := channels.NewService(rdb)
 	expRepo := pgrepo.NewGiveawayRepository(pg)
-	expSvc := gsvc.NewService(expRepo)
+	expSvc := gsvc.NewService(expRepo, chs)
 	// Attach Telegram + notifications so worker can emit completion messages
 	tgClient := tg.NewClientFromEnv()
-	chs := channels.NewService(rdb)
 	notifier := notify.NewService(tgClient, chs, cfg.WebAppBaseURL)
 	expSvc = expSvc.WithTelegram(tgClient).WithNotifier(notifier)
 	go func() {

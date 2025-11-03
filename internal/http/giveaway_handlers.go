@@ -119,15 +119,7 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 	for _, r := range req.Requirements {
 		switch r.Type {
 		case dg.RequirementTypeSubscription:
-			uname := r.ChannelUsername
-			if uname == "" {
-				uname = r.Username
-			}
-			// normalize without @ for storage; telegram client accepts with @
-			normalized := uname
-			if len(normalized) > 0 && normalized[0] == '@' {
-				normalized = normalized[1:]
-			}
+			channelID := r.ChannelID
 			reqEntry := dg.Requirement{Type: dg.RequirementTypeSubscription}
 			if r.Name != "" {
 				reqEntry.ChannelTitle = r.Name
@@ -136,8 +128,8 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 				reqEntry.Description = r.Description
 			}
 			// Try Telegram enrichment
-			if h.telegram != nil && normalized != "" {
-				if info, err := h.telegram.GetPublicChannelInfo(c.Context(), normalized); err == nil && info != nil {
+			if h.telegram != nil && channelID != 0 {
+				if info, err := h.telegram.GetPublicChannelInfo(c.Context(), strconv.FormatInt(channelID, 10)); err == nil && info != nil {
 					reqEntry.ChannelID = info.ID
 					reqEntry.ChannelUsername = info.Username
 					reqEntry.ChannelTitle = info.Title
@@ -150,7 +142,7 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 					}
 				} else {
 					// fallback: store username only when API fails
-					reqEntry.ChannelUsername = normalized
+					reqEntry.ChannelUsername = r.ChannelUsername
 					if r.ChannelID != 0 {
 						reqEntry.ChannelID = r.ChannelID
 					}
@@ -160,7 +152,7 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 				}
 			} else {
 				// No telegram client: store what we have
-				reqEntry.ChannelUsername = normalized
+				reqEntry.ChannelUsername = r.ChannelUsername
 				if r.ChannelID != 0 {
 					reqEntry.ChannelID = r.ChannelID
 				}
@@ -224,7 +216,6 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 
 func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 	id := c.Params("id")
-	fmt.Println("id", id)
 	g, err := h.service.GetByID(c.Context(), id)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
@@ -245,6 +236,7 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 		Type        dg.RequirementType `json:"type"`
 		Username    string             `json:"username,omitempty"`
 		AvatarURL   string             `json:"avatar_url,omitempty"`
+		URL         string             `json:"url,omitempty"`
 		Description string             `json:"description,omitempty"`
 		// On-chain fields
 		TonMinBalanceNano int64  `json:"ton_min_balance_nano,omitempty"`
@@ -289,6 +281,7 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 			TonMinBalanceNano: r.TonMinBalanceNano,
 			JettonAddress:     r.JettonAddress,
 			JettonMinAmount:   r.JettonMinAmount,
+			URL:               r.ChannelURL,
 		}
 		if r.Type == dg.RequirementTypeHoldJetton && r.JettonAddress != "" && h.ton != nil {
 			if meta, err := h.ton.GetJettonMeta(c.Context(), r.JettonAddress); err == nil && meta != nil {

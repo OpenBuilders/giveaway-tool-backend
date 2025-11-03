@@ -67,6 +67,7 @@ func (r *GiveawayRepository) Create(ctx context.Context, g *dg.Giveaway) error {
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`
 		for _, rqm := range g.Requirements {
 			var cid interface{}
+
 			if rqm.ChannelID != 0 {
 				cid = rqm.ChannelID
 			} else {

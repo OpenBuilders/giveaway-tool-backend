@@ -6,6 +6,7 @@ import (
 	tgsvc "github.com/open-builders/giveaway-backend/internal/service/telegram"
 	tonb "github.com/open-builders/giveaway-backend/internal/service/tonbalance"
 	usersvc "github.com/open-builders/giveaway-backend/internal/service/user"
+	channelsvc "github.com/open-builders/giveaway-backend/internal/service/channels"
 	tgutils "github.com/open-builders/giveaway-backend/internal/utils/telegram"
 	"math/big"
 	"strconv"
@@ -15,11 +16,12 @@ import (
 type RequirementsHandlers struct {
 	telegram *tgsvc.Client
 	users    *usersvc.Service
+	channels *channelsvc.Service
 	ton      *tonb.Service
 }
 
-func NewRequirementsHandlers(tg *tgsvc.Client, users *usersvc.Service, ton *tonb.Service) *RequirementsHandlers {
-	return &RequirementsHandlers{telegram: tg, users: users, ton: ton}
+func NewRequirementsHandlers(tg *tgsvc.Client, users *usersvc.Service, ton *tonb.Service, channels *channelsvc.Service) *RequirementsHandlers {
+	return &RequirementsHandlers{telegram: tg, users: users, ton: ton, channels: channels}
 }
 
 func (h *RequirementsHandlers) RegisterFiber(r fiber.Router) {
@@ -55,6 +57,7 @@ type checkBulkItem struct {
 		Title     string `json:"title"`
 		Username  string `json:"username"`
 		AvatarURL string `json:"avatar_url"`
+		URL       string `json:"url"`
 	} `json:"channel"`
 	BotStatus struct {
 		Status          string `json:"status"`
@@ -118,6 +121,7 @@ func (h *RequirementsHandlers) checkBotMembershipBulk(c *fiber.Ctx) error {
 				Title     string `json:"title"`
 				Username  string `json:"username"`
 				AvatarURL string `json:"avatar_url"`
+				URL       string `json:"url"`
 			}{ID: intID, Type: "channel", Title: "Channel", Username: "Channel"}, Ok: false, Error: err.Error()})
 			continue
 		}
@@ -130,6 +134,19 @@ func (h *RequirementsHandlers) checkBotMembershipBulk(c *fiber.Ctx) error {
 			item.Channel.Username = ch.Username
 			item.Channel.AvatarURL = tgutils.BuildAvatarURL(strconv.FormatInt(ch.ID, 10))
 		}
+
+		ch, err := h.channels.GetByID(c.Context(), intID)
+		if err != nil {
+			item.Ok = false
+			item.Error = err.Error()
+		} else {
+			item.Channel.ID = ch.ID
+			item.Channel.Title = ch.Title
+			item.Channel.Username = ch.Username
+			item.Channel.AvatarURL = ch.AvatarURL
+			item.Channel.URL = ch.URL
+		}
+
 		// Check membership
 		ok, err := h.telegram.IsBotMember(c.Context(), channelID)
 		if err != nil {

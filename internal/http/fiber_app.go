@@ -81,7 +81,7 @@ func NewFiberApp(pg *sql.DB, rdb *redisp.Client, cfg *config.Config) *fiber.App 
 	gRepo := pgrepo.NewGiveawayRepository(pg)
 	tgClient := telegram.NewClientFromEnv()
 	notifier := notify.NewService(tgClient, chs, cfg.WebAppBaseURL)
-	gs := gsvc.NewService(gRepo).WithTelegram(tgClient).WithNotifier(notifier)
+	gs := gsvc.NewService(gRepo, chs).WithTelegram(tgClient).WithNotifier(notifier)
 	// TON balance via TonAPI
 	tbs := tonbalance.NewService(cfg.TonAPIBaseURL, cfg.TonAPIToken).WithCache(rdb, 0)
 	gh := NewGiveawayHandlersFiber(gs, chs, tgClient, us, tbs)
@@ -103,7 +103,7 @@ func NewFiberApp(pg *sql.DB, rdb *redisp.Client, cfg *config.Config) *fiber.App 
 	ch := NewChannelHandlers(tgClient, avatarCache, photoCache)
 	ch.RegisterFiber(v1) // Protected: info, membership, boost
 
-	rq := NewRequirementsHandlers(tgClient, us, tbs)
+	rq := NewRequirementsHandlers(tgClient, us, tbs, chs)
 	rq.RegisterFiber(v1)
 
 	// Public endpoints (no init-data required)

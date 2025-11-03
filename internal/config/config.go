@@ -13,6 +13,8 @@ type Config struct {
 	RedisAddr     string
 	RedisPassword string
 	RedisDB       int
+	// Public base URL for building links to this backend (e.g., for public avatars)
+	PublicBaseURL string
 	// DB migrations
 	DBAutoMigrate bool
 	// CORS settings
@@ -40,6 +42,7 @@ func Load() (*Config, error) {
 		DatabaseURL:        getEnv("DATABASE_URL", "postgres://user:password@localhost:5432/giveaway?sslmode=disable"),
 		RedisAddr:          getEnv("REDIS_ADDR", "localhost:6379"),
 		RedisPassword:      getEnv("REDIS_PASSWORD", ""),
+		PublicBaseURL:      getEnv("PUBLIC_BASE_URL", "https://dev-api.giveaway.tools.tg"),
 		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "*"),
 		TelegramBotToken:   getEnv("TELEGRAM_BOT_TOKEN", ""),
 		TonProofDomain:     getEnv("TON_PROOF_DOMAIN", ""),
@@ -87,4 +90,9 @@ func getEnv(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// GetPublicBaseURL returns the public base URL from environment with a sane default.
+func GetPublicBaseURL() string {
+	return getEnv("PUBLIC_BASE_URL", "http://localhost:8080")
 }
