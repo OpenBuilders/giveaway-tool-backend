@@ -289,6 +289,11 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 		if name == "" {
 			name = r.Title
 		}
+		// Build URL for requirement: prefer stored ChannelURL, else build from username
+		reqURL := r.ChannelURL
+		if reqURL == "" && r.ChannelUsername != "" {
+			reqURL = "https://t.me/" + r.ChannelUsername
+		}
 		it := requirementDTO{
 			Name:              name,
 			Type:              r.Type,
@@ -298,7 +303,7 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 			TonMinBalanceNano: r.TonMinBalanceNano,
 			JettonAddress:     r.JettonAddress,
 			JettonMinAmount:   r.JettonMinAmount,
-			URL:               r.ChannelURL,
+			URL:               reqURL,
 		}
 		if r.Type == dg.RequirementTypeHoldJetton && r.JettonAddress != "" && h.ton != nil {
 			if meta, err := h.ton.GetJettonMeta(c.Context(), r.JettonAddress); err == nil && meta != nil {
@@ -721,6 +726,7 @@ func (h *GiveawayHandlersFiber) checkRequirements(c *fiber.Ctx) error {
 		Username  string `json:"username"`
 		Type      string `json:"type"`
 		AvatarURL string `json:"avatar_url"`
+		URL       string `json:"url"`
 	}
 	type item struct {
 		Name              string             `json:"name"`
@@ -741,12 +747,17 @@ func (h *GiveawayHandlersFiber) checkRequirements(c *fiber.Ctx) error {
 	allMet := true
 
 	for _, rqm := range g.Requirements {
+		// Build channel URL: prefer stored ChannelURL, else from username
+		channelURL := rqm.ChannelURL
+		if channelURL == "" && rqm.ChannelUsername != "" {
+			channelURL = "https://t.me/" + rqm.ChannelUsername
+		}
 		it := item{
 			Name:              rqm.ChannelTitle,
 			Type:              rqm.Type,
 			Username:          rqm.ChannelUsername,
 			Status:            "failed",
-			ChatInfo:          chatInfo{Title: rqm.ChannelTitle, Username: rqm.ChannelUsername, AvatarURL: rqm.AvatarURL},
+			ChatInfo:          chatInfo{Title: rqm.ChannelTitle, Username: rqm.ChannelUsername, AvatarURL: rqm.AvatarURL, URL: channelURL},
 			TonMinBalanceNano: rqm.TonMinBalanceNano,
 			JettonAddress:     rqm.JettonAddress,
 			JettonMinAmount:   rqm.JettonMinAmount,
@@ -777,6 +788,9 @@ func (h *GiveawayHandlersFiber) checkRequirements(c *fiber.Ctx) error {
 				}
 				if it.ChatInfo.AvatarURL == "" {
 					it.ChatInfo.AvatarURL = info.AvatarURL
+				}
+				if it.ChatInfo.URL == "" && info.ChannelURL != "" {
+					it.ChatInfo.URL = info.ChannelURL
 				}
 			}
 		}
