@@ -153,6 +153,10 @@ func (r *GiveawayRepository) GetByID(ctx context.Context, id string) (*dg.Giveaw
 			if err := srows.Scan(&s.Username, &s.URL, &s.Title, &s.ID, &s.AvatarURL); err != nil {
 				return nil, err
 			}
+			// Fallback: if URL not stored, build from username
+			if s.URL == "" && s.Username != "" {
+				s.URL = "https://t.me/" + s.Username
+			}
 			g.Sponsors = append(g.Sponsors, s)
 		}
 		if err := srows.Err(); err != nil {
@@ -304,6 +308,9 @@ func (r *GiveawayRepository) ListByCreator(ctx context.Context, creatorID int64,
 				if err := srows.Scan(&s.Username, &s.URL, &s.Title, &s.ID, &s.AvatarURL); err != nil {
 					srows.Close()
 					return nil, err
+				}
+				if s.URL == "" && s.Username != "" {
+					s.URL = "https://t.me/" + s.Username
 				}
 				g.Sponsors = append(g.Sponsors, s)
 			}
@@ -935,6 +942,9 @@ func (r *GiveawayRepository) ListActive(ctx context.Context, limit, offset, minP
 				if err := srows.Scan(&s.Username, &s.URL, &s.Title, &s.ID, &s.AvatarURL); err != nil {
 					srows.Close()
 					return nil, err
+				}
+				if s.URL == "" && s.Username != "" {
+					s.URL = "https://t.me/" + s.Username
 				}
 				g.Sponsors = append(g.Sponsors, s)
 			}

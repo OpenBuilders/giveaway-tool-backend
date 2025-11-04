@@ -253,7 +253,7 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 		Type        dg.RequirementType `json:"type"`
 		Username    string             `json:"username,omitempty"`
 		AvatarURL   string             `json:"avatar_url,omitempty"`
-		URL         string             `json:"url,omitempty"`
+		URL         string             `json:"url"`
 		Description string             `json:"description,omitempty"`
 		// On-chain fields
 		TonMinBalanceNano int64  `json:"ton_min_balance_nano,omitempty"`
@@ -262,6 +262,14 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 		// Jetton metadata enrichment
 		JettonSymbol string `json:"jetton_symbol,omitempty"`
 		JettonImage  string `json:"jetton_image,omitempty"`
+	}
+
+	type sponsorDTO struct {
+		ID        int64  `json:"id"`
+		Username  string `json:"username,omitempty"`
+		AvatarURL string `json:"avatar_url,omitempty"`
+		URL       string `json:"url"`
+		Title     string `json:"title,omitempty"`
 	}
 
 	type GiveawayDTO struct {
@@ -276,7 +284,7 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 		CreatedAt         time.Time         `json:"created_at"`
 		UpdatedAt         time.Time         `json:"updated_at"`
 		Prizes            []dg.PrizePlace   `json:"prizes,omitempty"`
-		Sponsors          []dg.ChannelInfo  `json:"sponsors"`
+		Sponsors          []sponsorDTO      `json:"sponsors"`
 		Requirements      []requirementDTO  `json:"requirements,omitempty"`
 		Winners           []dg.Winner       `json:"winners,omitempty"`
 		ParticipantsCount int               `json:"participants_count"`
@@ -314,6 +322,22 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 		reqs = append(reqs, it)
 	}
 
+	// Map sponsors with URL always present (may be empty string)
+	sponsors := make([]sponsorDTO, 0, len(g.Sponsors))
+	for _, s := range g.Sponsors {
+		url := s.URL
+		if url == "" && s.Username != "" {
+			url = "https://t.me/" + s.Username
+		}
+		sponsors = append(sponsors, sponsorDTO{
+			ID:        s.ID,
+			Username:  s.Username,
+			AvatarURL: s.AvatarURL,
+			URL:       url,
+			Title:     s.Title,
+		})
+	}
+
 	dto := GiveawayDTO{
 		ID:                g.ID,
 		Title:             g.Title,
@@ -326,7 +350,7 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 		CreatedAt:         g.CreatedAt,
 		UpdatedAt:         g.UpdatedAt,
 		Prizes:            g.Prizes,
-		Sponsors:          g.Sponsors,
+		Sponsors:          sponsors,
 		Requirements:      reqs,
 		Winners:           g.Winners,
 		ParticipantsCount: g.ParticipantsCount,
