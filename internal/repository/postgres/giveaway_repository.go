@@ -56,7 +56,13 @@ func (r *GiveawayRepository) Create(ctx context.Context, g *dg.Giveaway) error {
 
 	const qSponsor = `INSERT INTO giveaway_sponsors (giveaway_id, username, url, title, channel_id, avatar_url) VALUES ($1,$2,$3,$4,$5,$6)`
 	for _, s := range g.Sponsors {
-		if _, err = tx.ExecContext(ctx, qSponsor, g.ID, s.Username, s.URL, s.Title, s.ID, s.AvatarURL); err != nil {
+		var uname interface{}
+		if s.Username != "" {
+			uname = s.Username
+		} else {
+			uname = nil
+		}
+		if _, err = tx.ExecContext(ctx, qSponsor, g.ID, uname, s.URL, s.Title, s.ID, s.AvatarURL); err != nil {
 			return err
 		}
 	}
@@ -138,7 +144,7 @@ func (r *GiveawayRepository) GetByID(ctx context.Context, id string) (*dg.Giveaw
 	}
 
 	// Sponsors
-	const qs = `SELECT username, url, title, channel_id, COALESCE(avatar_url,'') AS avatar_url FROM giveaway_sponsors WHERE giveaway_id=$1`
+	const qs = `SELECT COALESCE(username,'') AS username, url, title, channel_id, COALESCE(avatar_url,'') AS avatar_url FROM giveaway_sponsors WHERE giveaway_id=$1`
 	srows, err := r.db.QueryContext(ctx, qs, id)
 	if err == nil {
 		defer srows.Close()
@@ -290,7 +296,7 @@ func (r *GiveawayRepository) ListByCreator(ctx context.Context, creatorID int64,
 			return nil, err
 		}
 		// Load sponsors for each giveaway (same as in GetByID)
-		const qs = `SELECT username, url, title, channel_id, COALESCE(avatar_url,'') AS avatar_url FROM giveaway_sponsors WHERE giveaway_id=$1`
+		const qs = `SELECT COALESCE(username,'') AS username, url, title, channel_id, COALESCE(avatar_url,'') AS avatar_url FROM giveaway_sponsors WHERE giveaway_id=$1`
 		srows, err := r.db.QueryContext(ctx, qs, g.ID)
 		if err == nil {
 			for srows.Next() {
@@ -921,7 +927,7 @@ func (r *GiveawayRepository) ListActive(ctx context.Context, limit, offset, minP
 			return nil, err
 		}
 		// Load sponsors
-		const qs = `SELECT username, url, title, channel_id, COALESCE(avatar_url,'') AS avatar_url FROM giveaway_sponsors WHERE giveaway_id=$1`
+		const qs = `SELECT COALESCE(username,'') AS username, url, title, channel_id, COALESCE(avatar_url,'') AS avatar_url FROM giveaway_sponsors WHERE giveaway_id=$1`
 		srows, err := r.db.QueryContext(ctx, qs, g.ID)
 		if err == nil {
 			for srows.Next() {

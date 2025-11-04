@@ -60,4 +60,3 @@ func (c *ChannelAvatarCache) Set(ctx context.Context, chatID int64, e *ChannelAv
 func (c *ChannelAvatarCache) Invalidate(ctx context.Context, chatID int64) error {
 	return c.client.Del(ctx, c.key(chatID)).Err()
 }
-

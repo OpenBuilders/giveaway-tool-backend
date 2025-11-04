@@ -61,4 +61,3 @@ func (c *ChannelPhotoCache) Set(ctx context.Context, chatRef string, e *ChannelP
 func (c *ChannelPhotoCache) Invalidate(ctx context.Context, chatRef string) error {
 	return c.client.Del(ctx, c.key(chatRef)).Err()
 }
-

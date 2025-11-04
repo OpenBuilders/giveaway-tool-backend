@@ -129,26 +129,38 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 			}
 			// Try Telegram enrichment
 			if h.telegram != nil && channelID != 0 {
-				if info, err := h.telegram.GetPublicChannelInfo(c.Context(), strconv.FormatInt(channelID, 10)); err == nil && info != nil {
-					reqEntry.ChannelID = info.ID
-					reqEntry.ChannelUsername = info.Username
-					reqEntry.ChannelTitle = info.Title
-					reqEntry.ChannelURL = info.ChannelURL
-					// prefer client-provided avatar if present
-					if r.AvatarURL != "" {
-						reqEntry.AvatarURL = r.AvatarURL
-					} else {
-						reqEntry.AvatarURL = info.AvatarURL
-					}
-				} else {
-					// fallback: store username only when API fails
-					reqEntry.ChannelUsername = r.ChannelUsername
-					if r.ChannelID != 0 {
-						reqEntry.ChannelID = r.ChannelID
-					}
-					if r.AvatarURL != "" {
-						reqEntry.AvatarURL = r.AvatarURL
-					}
+				// if info, err := h.telegram.GetPublicChannelInfo(c.Context(), strconv.FormatInt(channelID, 10)); err == nil && info != nil {
+				// 	reqEntry.ChannelID = info.ID
+				// 	reqEntry.ChannelUsername = info.Username
+				// 	reqEntry.ChannelTitle = info.Title
+				// 	reqEntry.ChannelURL = info.ChannelURL
+				// 	// prefer client-provided avatar if present
+				// 	if r.AvatarURL != "" {
+				// 		reqEntry.AvatarURL = r.AvatarURL
+				// 	} else {
+				// 		reqEntry.AvatarURL = info.AvatarURL
+				// 	}
+				// } else {
+				// 	// fallback: store username only when API fails
+				// 	reqEntry.ChannelUsername = r.ChannelUsername
+				// 	if r.ChannelID != 0 {
+				// 		reqEntry.ChannelID = r.ChannelID
+				// 	}
+				// 	if r.AvatarURL != "" {
+				// 		reqEntry.AvatarURL = r.AvatarURL
+				// 	}
+				// }
+
+				ch, _ := h.channels.GetByID(c.Context(), channelID)
+				if ch != nil {
+					reqEntry.ChannelID = ch.ID
+					reqEntry.ChannelUsername = ch.Username
+					reqEntry.ChannelTitle = ch.Title
+					reqEntry.ChannelURL = ch.URL
+					reqEntry.AvatarURL = ch.AvatarURL
+				}
+				if reqEntry.ChannelURL == "" {
+					reqEntry.ChannelURL = "https://t.me/" + reqEntry.ChannelUsername
 				}
 			} else {
 				// No telegram client: store what we have
@@ -199,6 +211,11 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 				if ch.Username != "" {
 					url = "https://t.me/" + ch.Username
 				}
+
+				if ch.URL != "" {
+					url = ch.URL
+				}
+
 				g.Sponsors = append(g.Sponsors, dg.ChannelInfo{ID: ch.ID, Title: ch.Title, Username: ch.Username, URL: url, AvatarURL: ch.AvatarURL})
 				continue
 			}
