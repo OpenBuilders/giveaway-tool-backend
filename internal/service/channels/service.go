@@ -6,6 +6,8 @@ import (
 	"net/url"
 	"strconv"
 
+	"errors"
+
 	rplatform "github.com/open-builders/giveaway-backend/internal/platform/redis"
 	tgutils "github.com/open-builders/giveaway-backend/internal/utils/telegram"
 	"github.com/redis/go-redis/v9"
@@ -30,12 +32,32 @@ func NewService(rdb *rplatform.Client) *Service { return &Service{rdb: rdb} }
 
 // GetByID returns channel info by numeric id from Redis keys
 // channel:{id}:title, channel:{id}:username, channel:{id}:url. Missing keys yield empty fields.
-func (s *Service) GetByID(ctx context.Context, id int64) (*Channel, error) {
+// If requesterUserID is provided and non-zero, it additionally verifies that the channel belongs to the requester
+// by checking membership in the Redis set user:{requesterUserID}:channels.
+func (s *Service) GetByID(ctx context.Context, id int64, requesterUserID ...int64) (*Channel, error) {
+	// Optional ownership check when requester user id is provided
+	if len(requesterUserID) > 0 && requesterUserID[0] != 0 {
+		key := fmt.Sprintf("user:%d:channels", requesterUserID[0])
+		isOwner, err := s.rdb.SIsMember(ctx, key, strconv.FormatInt(id, 10)).Result()
+		if err != nil {
+			return nil, err
+		}
+		if !isOwner {
+			return nil, errors.New("forbidden")
+		}
+	}
+
 	title, _ := s.rdb.Get(ctx, fmt.Sprintf("channel:%d:title", id)).Result()
 	username, _ := s.rdb.Get(ctx, fmt.Sprintf("channel:%d:username", id)).Result()
 	urlVal, _ := s.rdb.Get(ctx, fmt.Sprintf("channel:%d:url", id)).Result()
 	photoSmall, _ := s.rdb.Get(ctx, fmt.Sprintf("channel:%d:photo_small_url", id)).Result()
 	avatar := buildAvatarURL(username, title, id)
+
+	// if all fields are empty, return nil
+	if title == "" && username == "" && urlVal == "" && photoSmall == "" && avatar == "" {
+		return nil, errors.New("channel not found")
+	}
+
 	return &Channel{ID: id, Title: title, Username: username, URL: urlVal, AvatarURL: avatar, PhotoSmallURL: photoSmall}, nil
 }
 

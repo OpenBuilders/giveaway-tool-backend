@@ -129,29 +129,10 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 			}
 			// Try Telegram enrichment
 			if h.telegram != nil && channelID != 0 {
-				// if info, err := h.telegram.GetPublicChannelInfo(c.Context(), strconv.FormatInt(channelID, 10)); err == nil && info != nil {
-				// 	reqEntry.ChannelID = info.ID
-				// 	reqEntry.ChannelUsername = info.Username
-				// 	reqEntry.ChannelTitle = info.Title
-				// 	reqEntry.ChannelURL = info.ChannelURL
-				// 	// prefer client-provided avatar if present
-				// 	if r.AvatarURL != "" {
-				// 		reqEntry.AvatarURL = r.AvatarURL
-				// 	} else {
-				// 		reqEntry.AvatarURL = info.AvatarURL
-				// 	}
-				// } else {
-				// 	// fallback: store username only when API fails
-				// 	reqEntry.ChannelUsername = r.ChannelUsername
-				// 	if r.ChannelID != 0 {
-				// 		reqEntry.ChannelID = r.ChannelID
-				// 	}
-				// 	if r.AvatarURL != "" {
-				// 		reqEntry.AvatarURL = r.AvatarURL
-				// 	}
-				// }
-
-				ch, _ := h.channels.GetByID(c.Context(), channelID)
+				ch, err := h.channels.GetByID(c.Context(), channelID, middleware.GetUserID(c))
+				if err != nil {
+					return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+				}
 				if ch != nil {
 					reqEntry.ChannelID = ch.ID
 					reqEntry.ChannelUsername = ch.Username
@@ -174,7 +155,31 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 			}
 			g.Requirements = append(g.Requirements, reqEntry)
 		case dg.RequirementTypeBoost:
-			g.Requirements = append(g.Requirements, dg.Requirement{Type: dg.RequirementTypeBoost, Description: r.Description})
+			channelID := r.ChannelID
+			reqEntry := dg.Requirement{Type: dg.RequirementTypeBoost}
+			if r.Name != "" {
+				reqEntry.ChannelTitle = r.Name
+			}
+			if r.Description != "" {
+				reqEntry.Description = r.Description
+			}
+			// Try Telegram enrichment
+			if h.telegram != nil && channelID != 0 {
+				ch, err := h.channels.GetByID(c.Context(), channelID, middleware.GetUserID(c))
+				if err != nil {
+					return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+				}
+				if ch != nil {
+					reqEntry.ChannelID = ch.ID
+					reqEntry.ChannelUsername = ch.Username
+					reqEntry.ChannelTitle = ch.Title
+					reqEntry.ChannelURL = "https://t.me/boost?c=" + strconv.FormatInt(ch.ID, 10)
+					reqEntry.AvatarURL = ch.AvatarURL
+				}
+			} else {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid requirement"})
+			}
+			g.Requirements = append(g.Requirements, reqEntry)
 		case dg.RequirementTypeCustom:
 			g.Requirements = append(g.Requirements, dg.Requirement{Type: dg.RequirementTypeCustom, ChannelTitle: r.Name, Description: r.Description})
 		case dg.RequirementTypeHoldTON:
@@ -190,6 +195,12 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 		if qty <= 0 {
 			qty = 1
 		}
+
+		// check if price title > 20 characters, if yes, return error
+		if len(p.Title) > 20 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "prize title too long"})
+		}
+
 		g.Prizes = append(g.Prizes, dg.PrizePlace{
 			Place:       p.Place,
 			Title:       p.Title,
@@ -205,7 +216,10 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 			continue
 		}
 		if h.channels != nil {
-			ch, _ := h.channels.GetByID(c.Context(), s.ID)
+			ch, err := h.channels.GetByID(c.Context(), s.ID, middleware.GetUserID(c))
+			if err != nil {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+			}
 			if ch != nil {
 				var url string
 				if ch.Username != "" {
@@ -302,6 +316,11 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 		if reqURL == "" && r.ChannelUsername != "" {
 			reqURL = "https://t.me/" + r.ChannelUsername
 		}
+
+		if r.Type == dg.RequirementTypeBoost {
+			reqURL = "https://t.me/boost?c=" + strconv.FormatInt(r.ChannelID, 10)
+		}
+
 		it := requirementDTO{
 			Name:              name,
 			Type:              r.Type,
