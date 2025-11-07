@@ -78,7 +78,7 @@ func (s *Service) ListUserChannels(ctx context.Context, userID int64) ([]Channel
 	titleCmds := make([]*redis.StringCmd, len(members))
 	usernameCmds := make([]*redis.StringCmd, len(members))
 	urlCmds := make([]*redis.StringCmd, len(members))
-	photoSmallCmds := make([]*redis.StringCmd, len(members))
+	// photoSmallCmds := make([]*redis.StringCmd, len(members))
 	chanIDs := make([]int64, len(members))
 	for i, m := range members {
 		id, convErr := strconv.ParseInt(m, 10, 64)
@@ -90,7 +90,7 @@ func (s *Service) ListUserChannels(ctx context.Context, userID int64) ([]Channel
 		titleCmds[i] = pipe.Get(ctx, fmt.Sprintf("channel:%d:title", id))
 		usernameCmds[i] = pipe.Get(ctx, fmt.Sprintf("channel:%d:username", id))
 		urlCmds[i] = pipe.Get(ctx, fmt.Sprintf("channel:%d:url", id))
-		photoSmallCmds[i] = pipe.Get(ctx, fmt.Sprintf("channel:%d:photo_small_url", id))
+		// photoSmallCmds[i] = pipe.Get(ctx, fmt.Sprintf("channel:%d:photo_small_url", id))
 	}
 	if _, err := pipe.Exec(ctx); err != nil && err.Error() != "redis: nil" {
 		// Ignore missing keys by not treating redis.Nil as fatal
@@ -105,9 +105,11 @@ func (s *Service) ListUserChannels(ctx context.Context, userID int64) ([]Channel
 		title, _ := titleCmds[i].Result()
 		username, _ := usernameCmds[i].Result()
 		urlVal, _ := urlCmds[i].Result()
-		photoSmall, _ := photoSmallCmds[i].Result()
+		// photoSmall, _ := photoSmallCmds[i].Result()
 		avatar := buildAvatarURL(username, title, id)
-		out = append(out, Channel{ID: id, Title: title, Username: username, URL: urlVal, AvatarURL: avatar, PhotoSmallURL: photoSmall})
+		out = append(out, Channel{ID: id, Title: title, Username: username, URL: urlVal, AvatarURL: avatar, 
+			// PhotoSmallURL: photoSmall
+		})
 	}
 	return out, nil
 }

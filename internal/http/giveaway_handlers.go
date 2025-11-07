@@ -173,7 +173,12 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 					reqEntry.ChannelID = ch.ID
 					reqEntry.ChannelUsername = ch.Username
 					reqEntry.ChannelTitle = ch.Title
-					reqEntry.ChannelURL = "https://t.me/boost?c=" + strconv.FormatInt(ch.ID, 10)
+					// reqEntry.ChannelURL = "https://t.me/boost?c=" + strconv.FormatInt(ch.ID, 10)
+					if r.ChannelUsername != "" {
+						reqEntry.ChannelURL = "https://t.me/boost/" + ch.Username
+					} else {
+						reqEntry.ChannelURL = "https://t.me/c/" + strings.TrimPrefix(strconv.FormatInt(ch.ID, 10), "-100") + "?boost"
+					}
 					reqEntry.AvatarURL = ch.AvatarURL
 				}
 			} else {
@@ -318,7 +323,11 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 		}
 
 		if r.Type == dg.RequirementTypeBoost {
-			reqURL = "https://t.me/boost?c=" + strconv.FormatInt(r.ChannelID, 10)
+			if r.ChannelUsername != "" {
+				reqURL = "https://t.me/boost/" + r.ChannelUsername
+			} else {
+				reqURL = "https://t.me/c/" + strings.TrimPrefix(strconv.FormatInt(r.ChannelID, 10), "-100") + "?boost"
+			}
 		}
 
 		it := requirementDTO{
