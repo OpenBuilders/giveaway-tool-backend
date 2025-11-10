@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	rplatform "github.com/open-builders/giveaway-backend/internal/platform/redis"
 	tgutils "github.com/open-builders/giveaway-backend/internal/utils/telegram"
 )
 
@@ -56,6 +57,66 @@ type user struct {
 	ID       int64  `json:"id"`
 	IsBot    bool   `json:"is_bot"`
 	Username string `json:"username"`
+}
+
+// BotMe stores minimal bot info cached in Redis.
+type BotMe struct {
+	ID       int64  `json:"id"`
+	Username string `json:"username"`
+	IsBot    bool   `json:"is_bot"`
+}
+
+// SetBotMe fetches current bot info via getMe and stores it in Redis.
+// Also sets a convenience key for username.
+func (c *Client) SetBotMe(ctx context.Context, rdb *rplatform.Client) error {
+	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/getMe", c.token)
+	var resp tgResponse[user]
+	if err := c.makeRequest(ctx, http.MethodGet, endpoint, nil, &resp); err != nil {
+		return err
+	}
+	if !resp.Ok || resp.Result.ID == 0 {
+		if resp.Description != "" {
+			return fmt.Errorf("getMe failed: %s", resp.Description)
+		}
+		return fmt.Errorf("getMe failed")
+	}
+	me := BotMe{ID: resp.Result.ID, Username: resp.Result.Username, IsBot: resp.Result.IsBot}
+	payload, err := json.Marshal(me)
+	if err != nil {
+		return err
+	}
+	if err := rdb.Set(ctx, "bot:me", payload, 0).Err(); err != nil {
+		return err
+	}
+	if me.Username != "" {
+		_ = rdb.Set(ctx, "bot:username", me.Username, 0).Err()
+	}
+	// cache locally as well
+	c.botID = me.ID
+	return nil
+}
+
+// GetBotMe returns cached bot info from Redis; if missing, it calls SetBotMe first.
+func (c *Client) GetBotMe(ctx context.Context, rdb *rplatform.Client) (*BotMe, error) {
+	v, err := rdb.Get(ctx, "bot:me").Bytes()
+	if err == nil && len(v) > 0 {
+		var me BotMe
+		if jerr := json.Unmarshal(v, &me); jerr == nil && me.ID != 0 {
+			return &me, nil
+		}
+	}
+	if err := c.SetBotMe(ctx, rdb); err != nil {
+		return nil, err
+	}
+	v, err = rdb.Get(ctx, "bot:me").Bytes()
+	if err != nil {
+		return nil, err
+	}
+	var me BotMe
+	if jerr := json.Unmarshal(v, &me); jerr != nil {
+		return nil, jerr
+	}
+	return &me, nil
 }
 
 // PublicChannelInfo is the response DTO for GET channel info.

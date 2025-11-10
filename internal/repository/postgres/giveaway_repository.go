@@ -165,8 +165,8 @@ func (r *GiveawayRepository) GetByID(ctx context.Context, id string) (*dg.Giveaw
 	} else {
 		return nil, err
 	}
-	// If finished, load winners and their prizes
-	if g.Status == dg.GiveawayStatusFinished {
+	// If finished or completed, load winners and their prizes
+	if g.Status == dg.GiveawayStatusFinished || g.Status == dg.GiveawayStatusCompleted {
 		// Winners by place
 		wrows, err := r.db.QueryContext(ctx, `SELECT place, user_id FROM giveaway_winners WHERE giveaway_id=$1 ORDER BY place ASC`, id)
 		if err != nil {

@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	dg "github.com/open-builders/giveaway-backend/internal/domain/giveaway"
+	redisp "github.com/open-builders/giveaway-backend/internal/platform/redis"
 	"github.com/open-builders/giveaway-backend/internal/service/channels"
 	tg "github.com/open-builders/giveaway-backend/internal/service/telegram"
+	usersvc "github.com/open-builders/giveaway-backend/internal/service/user"
 )
 
 // Service formats and sends giveaway notifications to creator channels.
@@ -15,10 +18,12 @@ type Service struct {
 	tg         *tg.Client
 	channels   *channels.Service
 	webAppBase string
+	rdb        *redisp.Client
+	users      *usersvc.Service
 }
 
-func NewService(tgc *tg.Client, chs *channels.Service, webAppBaseURL string) *Service {
-	return &Service{tg: tgc, channels: chs, webAppBase: strings.TrimRight(webAppBaseURL, "/")}
+func NewService(tgc *tg.Client, chs *channels.Service, webAppBaseURL string, rdb *redisp.Client, users *usersvc.Service) *Service {
+	return &Service{tg: tgc, channels: chs, webAppBase: strings.TrimRight(webAppBaseURL, "/"), rdb: rdb, users: users}
 }
 
 // NotifyStarted posts an announcement to all creator channels when a giveaway starts.
@@ -28,12 +33,15 @@ func (s *Service) NotifyStarted(ctx context.Context, g *dg.Giveaway) {
 	}
 	// Build message
 	text := buildStartMessage(g)
-	btnURL := s.buildWebAppURL(g.ID)
-	// Deliver to each creator channel
-	chs, err := s.channels.ListUserChannels(ctx, g.CreatorID)
-	if err != nil {
-		return
+	// Button URL: link to current bot username
+	btnURL := ""
+	if s.rdb != nil {
+		if me, err := s.tg.GetBotMe(ctx, s.rdb); err == nil && me != nil && me.Username != "" {
+			btnURL = fmt.Sprintf("https://t.me/%s?startapp=%s", me.Username, g.ID)
+		}
 	}
+	// Deliver to each creator channel
+	chs := g.Sponsors
 	for _, ch := range chs {
 		if ch.ID == 0 {
 			continue
@@ -49,11 +57,8 @@ func (s *Service) NotifyCompleted(ctx context.Context, g *dg.Giveaway, winnersSe
 	}
 	text := buildCompletedMessage(g, winnersSelected)
 	btnURL := s.buildWebAppURL(g.ID)
-	chs, err := s.channels.ListUserChannels(ctx, g.CreatorID)
-	if err != nil {
-		return
-	}
-	for _, ch := range chs {
+	// Send to sponsor channels
+	for _, ch := range g.Sponsors {
 		if ch.ID == 0 {
 			continue
 		}
@@ -66,6 +71,97 @@ func (s *Service) buildWebAppURL(id string) string {
 		return ""
 	}
 	return fmt.Sprintf("%s/g/%s", s.webAppBase, id)
+}
+
+func (s *Service) buildStartAppURL(id string) string {
+	if s.tg == nil || s.rdb == nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	me, err := s.tg.GetBotMe(ctx, s.rdb)
+	if err != nil || me == nil || me.Username == "" {
+		return ""
+	}
+	return fmt.Sprintf("https://t.me/%s?startapp=%s", me.Username, id)
+}
+
+// NotifyPending announces that winners will be selected manually (pending state).
+func (s *Service) NotifyPending(ctx context.Context, g *dg.Giveaway) {
+	if s == nil || s.tg == nil || g == nil {
+		return
+	}
+	text := fmt.Sprintf("⏳ Giveaway “%s” is now pending.\nOwners are selecting winners manually. Results will be announced soon.", g.Title)
+	btnURL := s.buildStartAppURL(g.ID)
+	for _, ch := range g.Sponsors {
+		if ch.ID == 0 {
+			continue
+		}
+		_ = s.tg.SendMessage(ctx, ch.ID, text, "HTML", "Open Giveaway", btnURL, true)
+	}
+}
+
+// NotifyWinnersSelected announces winners in sponsor channels and DMs winners (with delay).
+func (s *Service) NotifyWinnersSelected(ctx context.Context, g *dg.Giveaway, winners []dg.Winner) {
+	if s == nil || s.tg == nil || g == nil || len(winners) == 0 {
+		return
+	}
+	// Build winners list as usernames or tg:// links
+	names := make([]string, 0, len(winners))
+	for _, w := range winners {
+		label := ""
+		if s.users != nil {
+			if u, err := s.users.GetByID(ctx, w.UserID); err == nil && u != nil {
+				if u.Username != "" {
+					label = "@" + u.Username
+				} else {
+					display := u.FirstName
+					if display == "" && u.LastName != "" {
+						display = u.LastName
+					}
+					if display == "" {
+						display = "User"
+					}
+					label = fmt.Sprintf(`<a href="tg://user?id=%d">%s</a>`, w.UserID, escapeHTML(display))
+				}
+			}
+		}
+		if label == "" {
+			// Fallback: link with generic name
+			label = fmt.Sprintf(`<a href="tg://user?id=%d">%s</a>`, w.UserID, "User")
+		}
+		names = append(names, label)
+	}
+	var b strings.Builder
+	b.WriteString("🎉 Giveaway completed!\n\n")
+	if g.Title != "" {
+		b.WriteString("Title: ")
+		b.WriteString(g.Title)
+		b.WriteString("\n")
+	}
+	b.WriteString("Winners: ")
+	b.WriteString(strings.Join(names, ", "))
+	text := b.String()
+	btnURL := s.buildWebAppURL(g.ID)
+
+	// Post to sponsor channels
+	for _, ch := range g.Sponsors {
+		if ch.ID == 0 {
+			continue
+		}
+		_ = s.tg.SendMessage(ctx, ch.ID, text, "HTML", "View Results", btnURL, true)
+	}
+
+	// DM winners with small delay between sends
+	startURL := s.buildStartAppURL(g.ID)
+	for i, w := range winners {
+		go func(idx int, uid int64) {
+			// Spread sends a bit to avoid burst
+			time.Sleep(time.Duration(250+idx*150) * time.Millisecond)
+			msg := fmt.Sprintf("🎉 You won in “%s”!\nOpen the app to view details.", g.Title)
+			_ = s.tg.SendMessage(context.Background(), uid, msg, "HTML", "Open Giveaway", startURL, true)
+		}(i, w.UserID)
+	}
 }
 
 func buildStartMessage(g *dg.Giveaway) string {
@@ -121,6 +217,17 @@ func buildCompletedMessage(g *dg.Giveaway, winnersSelected int) string {
 	}
 	b.WriteString("🎊 Congratulations to all the winners!")
 	return b.String()
+}
+
+func escapeHTML(s string) string {
+	replacer := strings.NewReplacer(
+		"&", "&amp;",
+		"<", "&lt;",
+		">", "&gt;",
+		`"`, "&quot;",
+		"'", "&#39;",
+	)
+	return replacer.Replace(s)
 }
 
 func collectSponsorsUsernames(g *dg.Giveaway) string {

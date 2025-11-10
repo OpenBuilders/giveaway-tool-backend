@@ -1,6 +1,8 @@
 package http
 
 import (
+	"bytes"
+	"encoding/csv"
 	"fmt"
 	"io"
 	"math/big"
@@ -8,11 +10,14 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 
 	dg "github.com/open-builders/giveaway-backend/internal/domain/giveaway"
 	"github.com/open-builders/giveaway-backend/internal/http/middleware"
+	redisp "github.com/open-builders/giveaway-backend/internal/platform/redis"
 	chsvc "github.com/open-builders/giveaway-backend/internal/service/channels"
 	gsvc "github.com/open-builders/giveaway-backend/internal/service/giveaway"
 	tgsvc "github.com/open-builders/giveaway-backend/internal/service/telegram"
@@ -28,16 +33,19 @@ type GiveawayHandlersFiber struct {
 	telegram *tgsvc.Client
 	users    *usersvc.Service
 	ton      *tonb.Service
+	rdb      *redisp.Client
 }
 
-func NewGiveawayHandlersFiber(svc *gsvc.Service, chs *chsvc.Service, tg *tgsvc.Client, users *usersvc.Service, ton *tonb.Service) *GiveawayHandlersFiber {
-	return &GiveawayHandlersFiber{service: svc, channels: chs, telegram: tg, users: users, ton: ton}
+func NewGiveawayHandlersFiber(svc *gsvc.Service, chs *chsvc.Service, tg *tgsvc.Client, users *usersvc.Service, ton *tonb.Service, rdb *redisp.Client) *GiveawayHandlersFiber {
+	return &GiveawayHandlersFiber{service: svc, channels: chs, telegram: tg, users: users, ton: ton, rdb: rdb}
 }
 
 func (h *GiveawayHandlersFiber) RegisterFiber(r fiber.Router) {
 	r.Post("/giveaways", h.create)
 	r.Get("/giveaways/:id", h.getByID)
 	r.Get("/giveaways/:id/list-loaded-winners", h.listWinnersWithPrizes)
+	r.Get("/giveaways/:id/stats.csv", h.exportWinnersCSV)
+	r.Get("/giveaways/:id/export-link", h.generateExportLink)
 	r.Delete("/giveaways/:id/loaded-winners", h.clearLoadedWinners)
 	r.Get("/giveaways/:id/check-requirements", h.checkRequirements)
 	r.Get("/users/:creator_id/giveaways", h.listByCreator)
@@ -51,6 +59,11 @@ func (h *GiveawayHandlersFiber) RegisterFiber(r fiber.Router) {
 	// Manual winners upload (now returns preview-style response)
 	r.Post("/giveaways/:id/manual-candidates", h.uploadManualCandidates)
 	r.Get("/prizes/templates", h.listPrizeTemplates)
+}
+
+// RegisterPublicFiber registers public routes (no init-data auth).
+func (h *GiveawayHandlersFiber) RegisterPublicFiber(r fiber.Router) {
+	r.Get("/giveaways/export/:token", h.downloadExportCSV)
 }
 
 type createPrizeReq struct {
@@ -114,6 +127,10 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 
 	// Force creator from Telegram init-data context
 	g.CreatorID = middleware.GetUserID(c)
+
+	if utf8.RuneCountInString(g.Title) > 100 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Giveaway title too long (max 100 characters)"})
+	}
 
 	// Map and enrich requirements first (independent of prizes)
 	for _, r := range req.Requirements {
@@ -201,9 +218,9 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 			qty = 1
 		}
 
-		// check if price title > 20 characters, if yes, return error
-		if len(p.Title) > 20 {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "prize title too long"})
+		// check if price title > 20 characters, if yes, return error (count runes, not bytes)
+		if utf8.RuneCountInString(p.Title) > 20 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Prize title too long (max 20 characters)"})
 		}
 
 		g.Prizes = append(g.Prizes, dg.PrizePlace{
@@ -291,6 +308,15 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 		Title     string `json:"title,omitempty"`
 	}
 
+	type winnerDTO struct {
+		UserID    int64            `json:"user_id"`
+		Username  string           `json:"username,omitempty"`
+		Name      string           `json:"name"`
+		AvatarURL string           `json:"avatar_url,omitempty"`
+		Place     int              `json:"place"`
+		Prizes    []dg.WinnerPrize `json:"prizes"`
+	}
+
 	type GiveawayDTO struct {
 		ID                string            `json:"id"`
 		Title             string            `json:"title"`
@@ -305,7 +331,7 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 		Prizes            []dg.PrizePlace   `json:"prizes,omitempty"`
 		Sponsors          []sponsorDTO      `json:"sponsors"`
 		Requirements      []requirementDTO  `json:"requirements,omitempty"`
-		Winners           []dg.Winner       `json:"winners,omitempty"`
+		Winners           []winnerDTO       `json:"winners,omitempty"`
 		ParticipantsCount int               `json:"participants_count"`
 		UserRole          string            `json:"user_role,omitempty"`
 	}
@@ -366,6 +392,33 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 		})
 	}
 
+	// Enrich winners if any
+	enrichedWinners := make([]winnerDTO, 0, len(g.Winners))
+	for _, w := range g.Winners {
+		var username, name, avatar string
+		if h.users != nil {
+			if usr, uerr := h.users.GetByID(c.Context(), w.UserID); uerr == nil && usr != nil {
+				username = usr.Username
+				name = strings.TrimSpace(strings.TrimSpace(usr.FirstName + " " + usr.LastName))
+				avatar = usr.AvatarURL
+			}
+		}
+		if name == "" {
+			name = strconv.FormatInt(w.UserID, 10)
+		}
+		if avatar == "" {
+			avatar = tgutils.BuildAvatarURL(strconv.FormatInt(w.UserID, 10))
+		}
+		enrichedWinners = append(enrichedWinners, winnerDTO{
+			UserID:    w.UserID,
+			Username:  username,
+			Name:      name,
+			AvatarURL: avatar,
+			Place:     w.Place,
+			Prizes:    w.Prizes,
+		})
+	}
+
 	dto := GiveawayDTO{
 		ID:                g.ID,
 		Title:             g.Title,
@@ -380,7 +433,7 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 		Prizes:            g.Prizes,
 		Sponsors:          sponsors,
 		Requirements:      reqs,
-		Winners:           g.Winners,
+		Winners:           enrichedWinners,
 		ParticipantsCount: g.ParticipantsCount,
 		UserRole:          userRole,
 	}
@@ -683,7 +736,10 @@ func (h *GiveawayHandlersFiber) listWinnersWithPrizes(c *fiber.Ctx) error {
 			if usr, uerr := h.users.GetByID(c.Context(), w.UserID); uerr == nil && usr != nil {
 				username = usr.Username
 				name = strings.TrimSpace(strings.TrimSpace(usr.FirstName + " " + usr.LastName))
-				avatar = tgutils.BuildAvatarURL(strconv.FormatInt(w.UserID, 10))
+				avatar = usr.AvatarURL
+				if avatar == "" {
+					avatar = tgutils.BuildAvatarURL(strconv.FormatInt(w.UserID, 10))
+				}
 			}
 		}
 		resp = append(resp, respItem{
@@ -696,6 +752,218 @@ func (h *GiveawayHandlersFiber) listWinnersWithPrizes(c *fiber.Ctx) error {
 		})
 	}
 	return c.JSON(fiber.Map{"results": resp})
+}
+
+// exportWinnersCSV streams a CSV file with winners and their prizes.
+// Access: only giveaway creator with admin role.
+func (h *GiveawayHandlersFiber) exportWinnersCSV(c *fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing id"})
+	}
+	requesterID := middleware.GetUserID(c)
+	if requesterID == 0 {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	// Verify requester is admin
+	if h.users == nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "user service not configured"})
+	}
+	reqUser, err := h.users.GetByID(c.Context(), requesterID)
+	if err != nil || reqUser == nil {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "forbidden"})
+	}
+
+	// Verify ownership
+	g, err := h.service.GetByID(c.Context(), id)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	if g == nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "not found"})
+	}
+	if g.CreatorID != requesterID {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "forbidden"})
+	}
+	// Fetch winners with prizes
+	winners, err := h.service.ListWinnersWithPrizes(c.Context(), id)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	// Build CSV
+	var buf bytes.Buffer
+	// UTF-8 BOM for Excel compatibility with Cyrillic
+	_, _ = buf.Write([]byte{0xEF, 0xBB, 0xBF})
+	writer := csv.NewWriter(&buf)
+	_ = writer.Write([]string{"place", "user_id", "username", "first_name", "last_name", "wallet_address", "prize_title", "prize_description"})
+	for _, w := range winners {
+		var username, firstName, lastName, wallet string
+		if h.users != nil {
+			if usr, uerr := h.users.GetByID(c.Context(), w.UserID); uerr == nil && usr != nil {
+				username = usr.Username
+				firstName = usr.FirstName
+				lastName = usr.LastName
+				wallet = usr.WalletAddress
+			}
+		}
+		if len(w.Prizes) == 0 {
+			_ = writer.Write([]string{
+				strconv.Itoa(w.Place),
+				strconv.FormatInt(w.UserID, 10),
+				username,
+				firstName,
+				lastName,
+				wallet,
+				"",
+				"",
+			})
+			continue
+		}
+		for _, p := range w.Prizes {
+			_ = writer.Write([]string{
+				strconv.Itoa(w.Place),
+				strconv.FormatInt(w.UserID, 10),
+				username,
+				firstName,
+				lastName,
+				wallet,
+				p.Title,
+				p.Description,
+			})
+		}
+	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	filename := fmt.Sprintf("giveaway_%s_winners.csv", id)
+	c.Set(fiber.HeaderContentType, "text/csv; charset=utf-8")
+	c.Set(fiber.HeaderContentDisposition, fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	return c.Send(buf.Bytes())
+}
+
+// generateExportLink creates a short-lived token in Redis and returns a public URL to download CSV without auth.
+// Access: only giveaway creator with admin role.
+func (h *GiveawayHandlersFiber) generateExportLink(c *fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing id"})
+	}
+	requesterID := middleware.GetUserID(c)
+	if requesterID == 0 {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	if h.users == nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "user service not configured"})
+	}
+	usr, err := h.users.GetByID(c.Context(), requesterID)
+	if err != nil || usr == nil {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "forbidden"})
+	}
+	// Validate ownership
+	g, err := h.service.GetByID(c.Context(), id)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	if g == nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "not found"})
+	}
+	if g.CreatorID != requesterID {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "forbidden"})
+	}
+	if h.rdb == nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "redis not configured"})
+	}
+	token := uuid.NewString()
+	key := "export:giveaway:" + token
+	ttl := 2 * time.Minute
+	if err := h.rdb.SetEx(c.Context(), key, id, ttl).Err(); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to store token"})
+	}
+	publicURL := c.BaseURL() + "/api/public/giveaways/export/" + token
+	return c.JSON(fiber.Map{"url": publicURL, "expires_in": int(ttl.Seconds())})
+}
+
+// downloadExportCSV validates token (no auth), generates CSV and returns it, then invalidates token.
+func (h *GiveawayHandlersFiber) downloadExportCSV(c *fiber.Ctx) error {
+	token := c.Params("token")
+	if token == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing token"})
+	}
+	if h.rdb == nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "redis not configured"})
+	}
+	key := "export:giveaway:" + token
+	id, err := h.rdb.Get(c.Context(), key).Result()
+
+	if err != nil || id == "" {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "invalid or expired token"})
+	}
+	// One-time usage: best-effort delete
+	// _ = h.rdb.Del(c.Context(), key).Err()
+	// Ensure giveaway exists
+	g, err := h.service.GetByID(c.Context(), id)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	if g == nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "not found"})
+	}
+	// Fetch winners and build CSV (reuse logic)
+	winners, err := h.service.ListWinnersWithPrizes(c.Context(), id)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	var buf bytes.Buffer
+	_, _ = buf.Write([]byte{0xEF, 0xBB, 0xBF})
+	writer := csv.NewWriter(&buf)
+	_ = writer.Write([]string{"place", "user_id", "username", "first_name", "last_name", "wallet_address", "prize_title", "prize_description"})
+	for _, w := range winners {
+		var username, firstName, lastName, wallet string
+		if h.users != nil {
+			if usr, uerr := h.users.GetByID(c.Context(), w.UserID); uerr == nil && usr != nil {
+				username = usr.Username
+				firstName = usr.FirstName
+				lastName = usr.LastName
+				wallet = usr.WalletAddress
+			}
+		}
+		if len(w.Prizes) == 0 {
+			_ = writer.Write([]string{
+				strconv.Itoa(w.Place),
+				strconv.FormatInt(w.UserID, 10),
+				username,
+				firstName,
+				lastName,
+				wallet,
+				"",
+				"",
+			})
+			continue
+		}
+		for _, p := range w.Prizes {
+			_ = writer.Write([]string{
+				strconv.Itoa(w.Place),
+				strconv.FormatInt(w.UserID, 10),
+				username,
+				firstName,
+				lastName,
+				wallet,
+				p.Title,
+				p.Description,
+			})
+		}
+	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	filename := fmt.Sprintf("giveaway_%s_winners.csv", id)
+	c.Set(fiber.HeaderContentType, "text/csv; charset=utf-8")
+	c.Set(fiber.HeaderContentDisposition, fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	// Allow direct download in Telegram Web
+	c.Set("Access-Control-Allow-Origin", "https://web.telegram.org")
+	return c.Send(buf.Bytes())
 }
 
 // clearLoadedWinners deletes loaded winners and their prizes; only creator and only if pending.
@@ -911,13 +1179,25 @@ func (h *GiveawayHandlersFiber) checkSingleRequirement(c *fiber.Ctx, userID int6
 			res.Error = "invalid requirement: no channel"
 			return
 		}
-		ok, e := h.telegram.CheckBoost(c.Context(), userID, chat)
-		if e != nil {
-			res.Error = e.Error()
-			return
+		// Prefer Redis-based boost check if available
+		if h.rdb != nil && rqm.ChannelID != 0 {
+			key := fmt.Sprintf("channel:%d:boost_users", rqm.ChannelID)
+			uid := fmt.Sprintf("%d", userID)
+			if ok, err := h.rdb.SIsMember(c.Context(), key, uid).Result(); err == nil && ok {
+				res.Status = "success"
+				return
+			}
 		}
-		if ok {
-			res.Status = "success"
+		// Fallback to Telegram API check
+		if h.telegram != nil {
+			ok, e := h.telegram.CheckBoost(c.Context(), userID, chat)
+			if e != nil {
+				res.Error = e.Error()
+				return
+			}
+			if ok {
+				res.Status = "success"
+			}
 		}
 		return
 	case dg.RequirementTypeCustom:

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	rcache "github.com/open-builders/giveaway-backend/internal/cache/redis"
 	"github.com/open-builders/giveaway-backend/internal/config"
 	apphttp "github.com/open-builders/giveaway-backend/internal/http"
 	"github.com/open-builders/giveaway-backend/internal/platform/db"
@@ -17,6 +18,7 @@ import (
 	gsvc "github.com/open-builders/giveaway-backend/internal/service/giveaway"
 	notify "github.com/open-builders/giveaway-backend/internal/service/notifications"
 	tg "github.com/open-builders/giveaway-backend/internal/service/telegram"
+	usersvc "github.com/open-builders/giveaway-backend/internal/service/user"
 	migfs "github.com/open-builders/giveaway-backend/migrations"
 	"github.com/pressly/goose/v3"
 )
@@ -65,7 +67,11 @@ func main() {
 	expSvc := gsvc.NewService(expRepo, chs)
 	// Attach Telegram + notifications so worker can emit completion messages
 	tgClient := tg.NewClientFromEnv()
-	notifier := notify.NewService(tgClient, chs, cfg.WebAppBaseURL)
+	// user service for username/first name in notifications
+	urepo := pgrepo.NewUserRepository(pg)
+	ucache := rcache.NewUserCache(rdb, 5*time.Second)
+	usvc := usersvc.NewService(urepo, ucache)
+	notifier := notify.NewService(tgClient, chs, cfg.WebAppBaseURL, rdb, usvc)
 	expSvc = expSvc.WithTelegram(tgClient).WithNotifier(notifier)
 	go func() {
 		ticker := time.NewTicker(time.Duration(cfg.GiveawayExpireIntervalSec) * time.Second)

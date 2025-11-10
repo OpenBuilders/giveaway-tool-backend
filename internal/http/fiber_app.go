@@ -80,11 +80,17 @@ func NewFiberApp(pg *sql.DB, rdb *redisp.Client, cfg *config.Config) *fiber.App 
 	// Giveaway domain deps
 	gRepo := pgrepo.NewGiveawayRepository(pg)
 	tgClient := telegram.NewClientFromEnv()
-	notifier := notify.NewService(tgClient, chs, cfg.WebAppBaseURL)
-	gs := gsvc.NewService(gRepo, chs).WithTelegram(tgClient).WithNotifier(notifier)
+	// Prime bot info in Redis on startup (best-effort)
+	{
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_ = tgClient.SetBotMe(ctx, rdb)
+		cancel()
+	}
+	notifier := notify.NewService(tgClient, chs, cfg.WebAppBaseURL, rdb, us)
+	gs := gsvc.NewService(gRepo, chs).WithTelegram(tgClient).WithNotifier(notifier).WithRedis(rdb)
 	// TON balance via TonAPI
 	tbs := tonbalance.NewService(cfg.TonAPIBaseURL, cfg.TonAPIToken).WithCache(rdb, 0)
-	gh := NewGiveawayHandlersFiber(gs, chs, tgClient, us, tbs)
+	gh := NewGiveawayHandlersFiber(gs, chs, tgClient, us, tbs, rdb)
 
 	// API groups
 	ttl := time.Duration(cfg.InitDataTTL) * time.Second
@@ -109,6 +115,7 @@ func NewFiberApp(pg *sql.DB, rdb *redisp.Client, cfg *config.Config) *fiber.App 
 	// Public endpoints (no init-data required)
 	v1public := api.Group("/public")
 	ch.RegisterPublicFiber(v1public) // Public: avatar only
+	gh.RegisterPublicFiber(v1public) // Public: giveaways export by token
 
 	return app
 }

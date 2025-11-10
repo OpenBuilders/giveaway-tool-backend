@@ -94,9 +94,11 @@ func (h *UserHandlersFiber) getMe(c *fiber.Ctx) error {
 	firstName, _ := c.Locals(mw.FirstNameCtxParam).(string)
 	lastName, _ := c.Locals(mw.LastNameCtxParam).(string)
 	username, _ := c.Locals(mw.UsernameCtxParam).(string)
+	photoURL, _ := c.Locals(mw.UserPicCtxParam).(string)
 	// Load existing user to preserve wallet and role if present
 	walletAddress := ""
 	role := "user"
+	currentAvatar := ""
 	if u, err := h.service.GetByID(c.Context(), userID); err == nil && u != nil {
 		if u.Role != "" {
 			role = u.Role
@@ -104,6 +106,15 @@ func (h *UserHandlersFiber) getMe(c *fiber.Ctx) error {
 		if u.WalletAddress != "" {
 			walletAddress = u.WalletAddress
 		}
+		if u.AvatarURL != "" {
+			currentAvatar = u.AvatarURL
+		}
+	}
+
+	// Decide effective avatar to store/return
+	avatarURL := currentAvatar
+	if photoURL != "" && photoURL != currentAvatar {
+		avatarURL = photoURL
 	}
 
 	// create or update user
@@ -112,6 +123,7 @@ func (h *UserHandlersFiber) getMe(c *fiber.Ctx) error {
 		FirstName:     firstName,
 		LastName:      lastName,
 		Username:      username,
+		AvatarURL:     avatarURL,
 		Role:          role,
 		Status:        "active",
 		WalletAddress: walletAddress,
@@ -124,6 +136,7 @@ func (h *UserHandlersFiber) getMe(c *fiber.Ctx) error {
 		FirstName     string `json:"first_name"`
 		LastName      string `json:"last_name"`
 		Username      string `json:"username"`
+		AvatarURL     string `json:"avatar_url"`
 		Role          string `json:"role"`
 		WalletAddress string `json:"wallet_address"`
 	}
@@ -133,6 +146,7 @@ func (h *UserHandlersFiber) getMe(c *fiber.Ctx) error {
 		FirstName:     firstName,
 		LastName:      lastName,
 		Username:      username,
+		AvatarURL:     avatarURL,
 		Role:          role,
 		WalletAddress: walletAddress,
 	})

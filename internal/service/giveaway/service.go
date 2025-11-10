@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	dg "github.com/open-builders/giveaway-backend/internal/domain/giveaway"
+	redisp "github.com/open-builders/giveaway-backend/internal/platform/redis"
 	repo "github.com/open-builders/giveaway-backend/internal/repository/postgres"
 	channelsvc "github.com/open-builders/giveaway-backend/internal/service/channels"
 	notify "github.com/open-builders/giveaway-backend/internal/service/notifications"
@@ -23,6 +24,7 @@ type Service struct {
 	tg       *tg.Client
 	ntf      *notify.Service
 	channels *channelsvc.Service
+	rdb      *redisp.Client
 }
 
 func NewService(r *repo.GiveawayRepository, chs *channelsvc.Service) *Service {
@@ -34,6 +36,9 @@ func (s *Service) WithTelegram(client *tg.Client) *Service { s.tg = client; retu
 
 // WithNotifier injects notifications service for broadcasting updates.
 func (s *Service) WithNotifier(n *notify.Service) *Service { s.ntf = n; return s }
+
+// WithRedis injects Redis client for requirement checks like boost.
+func (s *Service) WithRedis(rdb *redisp.Client) *Service { s.rdb = rdb; return s }
 
 // Create validates and persists a new giveaway.
 func (s *Service) Create(ctx context.Context, g *dg.Giveaway) (string, error) {
@@ -183,6 +188,27 @@ func (s *Service) UpdateStatus(ctx context.Context, id string, status dg.Giveawa
 		if g.Status != dg.GiveawayStatusPending {
 			return errors.New("transition not allowed")
 		}
+		// Perform status update and then notify sponsors and winners
+		if err := s.repo.UpdateStatus(ctx, id, status); err != nil {
+			return err
+		}
+		if s.ntf != nil {
+			go func(giv *dg.Giveaway) {
+				// Refresh giveaway for any updated fields if needed
+				if gg, err := s.repo.GetByID(context.Background(), giv.ID); err == nil && gg != nil {
+					giv = gg
+				}
+				// Load winners and notify
+				w, err := s.repo.ListWinnersWithPrizes(context.Background(), giv.ID)
+				if err == nil && len(w) > 0 {
+					s.ntf.NotifyWinnersSelected(context.Background(), giv, w)
+				} else {
+					// fallback to simple completed message
+					s.ntf.NotifyCompleted(context.Background(), giv, 0)
+				}
+			}(g)
+		}
+		return nil
 	}
 	return s.repo.UpdateStatus(ctx, id, status)
 }
@@ -264,12 +290,25 @@ func (s *Service) Join(ctx context.Context, id string, userID int64) error {
 				if chat == "" {
 					continue
 				}
-				ok, err := s.tg.CheckBoost(ctx, userID, chat)
-				if err != nil {
-					continue
+				// Prefer Redis-based check
+				if s.rdb != nil && req.ChannelID != 0 {
+					key := fmt.Sprintf("channel:%d:boost_users", req.ChannelID)
+					if ok, err := s.rdb.SIsMember(ctx, key, fmt.Sprintf("%d", userID)).Result(); err == nil {
+						if !ok {
+							return errors.New("requirements not satisfied")
+						}
+						continue
+					}
 				}
-				if !ok {
-					return errors.New("requirements not satisfied")
+				// Fallback to Telegram API
+				if s.tg != nil {
+					ok, err := s.tg.CheckBoost(ctx, userID, chat)
+					if err != nil {
+						continue
+					}
+					if !ok {
+						return errors.New("requirements not satisfied")
+					}
 				}
 			}
 		}
@@ -309,7 +348,14 @@ func (s *Service) FinishOneWithDistribution(ctx context.Context, id string) erro
 	// If custom requirement exists, move to pending and return (winners will be uploaded manually)
 	for _, req := range g.Requirements {
 		if req.Type == dg.RequirementTypeCustom {
-			return s.repo.UpdateStatus(ctx, id, dg.GiveawayStatusPending)
+			if err := s.repo.UpdateStatus(ctx, id, dg.GiveawayStatusPending); err != nil {
+				return err
+			}
+			// Notify pending to sponsors
+			if s.ntf != nil {
+				go s.ntf.NotifyPending(context.Background(), g)
+			}
+			return nil
 		}
 	}
 	winnersCount := g.MaxWinnersCount
@@ -319,9 +365,17 @@ func (s *Service) FinishOneWithDistribution(ctx context.Context, id string) erro
 	if err := s.repo.FinishOneWithDistribution(ctx, id, winnersCount); err != nil {
 		return err
 	}
-	// Best-effort completion notification
+	// Best-effort completion notification with winners list + DMs
 	if s.ntf != nil {
-		go s.ntf.NotifyCompleted(context.Background(), g, winnersCount)
+		go func(giv *dg.Giveaway) {
+			winners, err := s.repo.ListWinnersWithPrizes(context.Background(), giv.ID)
+			if err == nil && len(winners) > 0 {
+				s.ntf.NotifyWinnersSelected(context.Background(), giv, winners)
+			} else {
+				// fallback to simple completed message
+				s.ntf.NotifyCompleted(context.Background(), giv, winnersCount)
+			}
+		}(g)
 	}
 	return nil
 }
@@ -413,12 +467,25 @@ func (s *Service) FinalizePendingWithCandidates(ctx context.Context, id string, 
 					if chat == "" {
 						continue
 					}
-					ok, err := s.tg.CheckBoost(ctx, uid, chat)
-					if err != nil {
-						continue
+					// Prefer Redis-based check
+					if s.rdb != nil && req.ChannelID != 0 {
+						key := fmt.Sprintf("channel:%d:boost_users", req.ChannelID)
+						if ok, err := s.rdb.SIsMember(ctx, key, fmt.Sprintf("%d", uid)).Result(); err == nil {
+							if !ok {
+								satisfies = false
+							}
+							break
+						}
 					}
-					if !ok {
-						satisfies = false
+					// Fallback to Telegram API
+					if s.tg != nil {
+						ok, err := s.tg.CheckBoost(ctx, uid, chat)
+						if err != nil {
+							continue
+						}
+						if !ok {
+							satisfies = false
+						}
 					}
 				}
 				if !satisfies {
@@ -437,6 +504,15 @@ func (s *Service) FinalizePendingWithCandidates(ctx context.Context, id string, 
 	}
 	if err := s.repo.FinishWithWinners(ctx, id, winners); err != nil {
 		return accepted, len(winners), err
+	}
+	// Notify sponsors and DM winners
+	if s.ntf != nil {
+		go func(giv *dg.Giveaway) {
+			w, err := s.repo.ListWinnersWithPrizes(context.Background(), giv.ID)
+			if err == nil && len(w) > 0 {
+				s.ntf.NotifyWinnersSelected(context.Background(), giv, w)
+			}
+		}(g)
 	}
 	return accepted, len(winners), nil
 }
@@ -487,17 +563,17 @@ func (s *Service) FinalizeWithWinners(ctx context.Context, id string, winners []
 		return err
 	}
 	if g == nil {
-		return errors.New("not found")
+		return errors.New("Giveaway not found")
 	}
 	// Only creator can finalize
 	// Caller context should ensure auth; we infer requester from business flow is creator
 	// For stricter checks, this method could accept requesterID; keeping simple here.
 	// Enforce pending status for manual finalization
 	if string(g.Status) != "pending" {
-		return errors.New("not pending")
+		return errors.New("Giveaway is not pending")
 	}
 	if len(winners) == 0 {
-		return errors.New("no winners")
+		return errors.New("Not enough winners")
 	}
 	// Keep only participants
 	filtered := make([]int64, 0, len(winners))
@@ -517,14 +593,26 @@ func (s *Service) FinalizeWithWinners(ctx context.Context, id string, winners []
 		filtered = append(filtered, uid)
 	}
 	if len(filtered) == 0 {
-		return errors.New("no valid winners")
+		return errors.New("No valid winners")
 	}
 	// Trim to winners_count
 	max := g.MaxWinnersCount
 	if max > 0 && len(filtered) > max {
 		filtered = filtered[:max]
 	}
-	return s.repo.FinishWithWinners(ctx, id, filtered)
+	if err := s.repo.FinishWithWinners(ctx, id, filtered); err != nil {
+		return err
+	}
+	// Notify sponsors and DM winners
+	if s.ntf != nil {
+		go func(giv *dg.Giveaway) {
+			w, err := s.repo.ListWinnersWithPrizes(context.Background(), giv.ID)
+			if err == nil && len(w) > 0 {
+				s.ntf.NotifyWinnersSelected(context.Background(), giv, w)
+			}
+		}(g)
+	}
+	return nil
 }
 
 // SetManualWinners stores winners and distributes prizes while keeping giveaway pending.
@@ -546,7 +634,7 @@ func (s *Service) SetManualWinners(ctx context.Context, id string, requesterID i
 		return errors.New("not pending")
 	}
 	if len(winners) == 0 {
-		return errors.New("no winners")
+		return errors.New("Not enough winners")
 	}
 	// Keep only participants, dedupe
 	filtered := make([]int64, 0, len(winners))
