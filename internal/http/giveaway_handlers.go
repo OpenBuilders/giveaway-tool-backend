@@ -1088,7 +1088,7 @@ func (h *GiveawayHandlersFiber) checkRequirements(c *fiber.Ctx) error {
 		}
 		// Best-effort chat info enrichment (type, avatar/title fallback)
 		// Prefer username; fallback to id
-		if h.telegram != nil {
+		if h.channels != nil {
 			var info *channels.Channel
 
 			if inf, e := h.channels.GetByID(c.Context(), rqm.ChannelID); e == nil {
@@ -1110,12 +1110,11 @@ func (h *GiveawayHandlersFiber) checkRequirements(c *fiber.Ctx) error {
 				if it.ChatInfo.AvatarURL == "" {
 					it.ChatInfo.AvatarURL = info.AvatarURL
 				}
-				if it.ChatInfo.URL == "" {
+				if info.URL != "" {
 					it.ChatInfo.URL = info.URL
 				}
 			}
 		}
-
 		// Perform requirement check via shared helper
 		res := h.checkSingleRequirement(c, userID, &rqm)
 		// Map result
