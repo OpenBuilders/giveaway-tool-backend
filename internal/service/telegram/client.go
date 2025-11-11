@@ -310,6 +310,35 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text string, par
 	return nil
 }
 
+// SendAnimation sends an animation (GIF) to a chat/channel with optional caption and inline button.
+// animation can be a file_id or an HTTP URL. parseMode can be "HTML" or "MarkdownV2".
+func (c *Client) SendAnimation(ctx context.Context, chatID int64, animation string, caption string, parseMode string, buttonText string, buttonURL string) error {
+	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/sendAnimation", c.token)
+	data := url.Values{
+		"chat_id":  {fmt.Sprintf("%d", chatID)},
+		"animation": {animation},
+	}
+	if caption != "" {
+		data.Set("caption", caption)
+	}
+	if parseMode != "" {
+		data.Set("parse_mode", parseMode)
+	}
+	if buttonText != "" && buttonURL != "" {
+		markup := fmt.Sprintf(`{"inline_keyboard":[[{"text":"%s","url":"%s"}]]}`,
+			escapeJSON(buttonText), escapeJSON(buttonURL))
+		data.Set("reply_markup", markup)
+	}
+	var resp tgResponse[map[string]any]
+	if err := c.makeRequest(ctx, http.MethodPost, endpoint, data, &resp); err != nil {
+		return err
+	}
+	if !resp.Ok {
+		return fmt.Errorf("telegram sendAnimation error: %s", resp.Description)
+	}
+	return nil
+}
+
 // escapeJSON performs a minimal escape for quotes and backslashes used in inline JSON strings.
 func escapeJSON(s string) string {
 	s = strings.ReplaceAll(s, `\\`, `\\\\`)

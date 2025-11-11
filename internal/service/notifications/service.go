@@ -46,7 +46,7 @@ func (s *Service) NotifyStarted(ctx context.Context, g *dg.Giveaway) {
 		if ch.ID == 0 {
 			continue
 		}
-		_ = s.tg.SendMessage(ctx, ch.ID, text, "HTML", "Open Giveaway", btnURL, true)
+		_ = s.tg.SendAnimation(ctx, ch.ID, "https://cdn.giveaway.tools.tg/assets/Started.gif", text, "HTML", "Open Giveaway", btnURL)
 	}
 }
 
@@ -62,7 +62,7 @@ func (s *Service) NotifyCompleted(ctx context.Context, g *dg.Giveaway, winnersSe
 		if ch.ID == 0 {
 			continue
 		}
-		_ = s.tg.SendMessage(ctx, ch.ID, text, "HTML", "View Results", btnURL, true)
+		_ = s.tg.SendAnimation(ctx, ch.ID, "https://cdn.giveaway.tools.tg/assets/Finished.gif", text, "HTML", "View Results", btnURL)
 	}
 }
 
