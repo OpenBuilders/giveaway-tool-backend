@@ -1054,7 +1054,7 @@ func (h *GiveawayHandlersFiber) checkRequirements(c *fiber.Ctx) error {
 		Username          string             `json:"username"`
 		Status            string             `json:"status"`
 		Error             string             `json:"error,omitempty"`
-		Link              string             `json:"link,omitempty"`
+		Link              string             `json:"url,omitempty"`
 		ChatInfo          chatInfo           `json:"chat_info"`
 		TonMinBalanceNano int64              `json:"ton_min_balance_nano,omitempty"`
 		JettonAddress     string             `json:"jetton_address,omitempty"`
@@ -1125,6 +1125,12 @@ func (h *GiveawayHandlersFiber) checkRequirements(c *fiber.Ctx) error {
 			if meta, err := h.ton.GetJettonMeta(c.Context(), rqm.JettonAddress); err == nil && meta != nil {
 				it.JettonSymbol = meta.Symbol
 				it.JettonImage = meta.Image
+			}
+		} else if rqm.Type == dg.RequirementTypeBoost {
+			if rqm.ChannelUsername != "" {
+				it.Link = "https://t.me/boost/" + rqm.ChannelUsername
+			} else {
+				it.Link = "https://t.me/c/" + strings.TrimPrefix(strconv.FormatInt(rqm.ChannelID, 10), "-100") + "?boost"
 			}
 		}
 
