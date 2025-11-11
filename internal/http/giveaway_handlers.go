@@ -18,6 +18,7 @@ import (
 	dg "github.com/open-builders/giveaway-backend/internal/domain/giveaway"
 	"github.com/open-builders/giveaway-backend/internal/http/middleware"
 	redisp "github.com/open-builders/giveaway-backend/internal/platform/redis"
+	"github.com/open-builders/giveaway-backend/internal/service/channels"
 	chsvc "github.com/open-builders/giveaway-backend/internal/service/channels"
 	gsvc "github.com/open-builders/giveaway-backend/internal/service/giveaway"
 	tgsvc "github.com/open-builders/giveaway-backend/internal/service/telegram"
@@ -1088,18 +1089,18 @@ func (h *GiveawayHandlersFiber) checkRequirements(c *fiber.Ctx) error {
 		// Best-effort chat info enrichment (type, avatar/title fallback)
 		// Prefer username; fallback to id
 		if h.telegram != nil {
-			var info *tgsvc.PublicChannelInfo
-			if rqm.ChannelUsername != "" {
-				if inf, e := h.telegram.GetPublicChannelInfo(c.Context(), rqm.ChannelUsername); e == nil {
-					info = inf
-				}
-			} else if rqm.ChannelID != 0 {
-				if inf, e := h.telegram.GetPublicChannelInfoByID(c.Context(), rqm.ChannelID); e == nil {
-					info = inf
-				}
+			var info *channels.Channel
+
+			if inf, e := h.channels.GetByID(c.Context(), rqm.ChannelID); e == nil {
+				info = inf
 			}
+
+			if rqm.ChannelUsername != "" {
+				it.ChatInfo.URL = "https://t.me/" + rqm.ChannelUsername
+			}
+
 			if info != nil {
-				it.ChatInfo.Type = info.Type
+				// it.ChatInfo.Type = info.Type
 				if it.ChatInfo.Title == "" {
 					it.ChatInfo.Title = info.Title
 				}
@@ -1109,8 +1110,8 @@ func (h *GiveawayHandlersFiber) checkRequirements(c *fiber.Ctx) error {
 				if it.ChatInfo.AvatarURL == "" {
 					it.ChatInfo.AvatarURL = info.AvatarURL
 				}
-				if it.ChatInfo.URL == "" && info.ChannelURL != "" {
-					it.ChatInfo.URL = info.ChannelURL
+				if it.ChatInfo.URL == "" {
+					it.ChatInfo.URL = info.URL
 				}
 			}
 		}
