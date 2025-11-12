@@ -225,7 +225,8 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 		}
 
 		g.Prizes = append(g.Prizes, dg.PrizePlace{
-			Place:       p.Place,
+			// Ignore incoming place and store as NULL → all prizes are loose
+			Place:       nil,
 			Title:       p.Title,
 			Description: p.Description,
 			Quantity:    qty,

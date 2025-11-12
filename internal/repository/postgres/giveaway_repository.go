@@ -490,35 +490,41 @@ func (r *GiveawayRepository) FinishOneWithDistribution(ctx context.Context, id s
 		}
 		uid := winners[place-1]
 		for _, pr := range list {
+			// Always give one unit to the fixed-place winner
 			if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, uid, pr.title, pr.desc); err != nil {
 				return err
+			}
+			// Distribute remaining quantity across all winners in the general loose pass
+			if pr.qty > 1 {
+				loose = append(loose, prize{title: pr.title, desc: pr.desc, qty: pr.qty - 1})
 			}
 		}
 	}
 
 	// Build list of winners without fixed prize
-	without := make([]int64, 0, winnersCount)
-	for place := 1; place <= winnersCount; place++ {
-		if len(fixed[place]) == 0 {
-			without = append(without, winners[place-1])
-		}
-	}
-	if len(without) > 1 {
-		rand.Shuffle(len(without), func(i, j int) { without[i], without[j] = without[j], without[i] })
-	}
+	// Deprecated: previously used to prioritize winners without fixed prizes.
+	// New distribution fills the full circle of winners first, then continues round-robin.
 
 	// Distribute loose prizes: first pass give one per winner without fixed
 	idx := 0
 	for _, pr := range loose {
 		remaining := pr.qty
-		// First pass
-		for i := 0; i < len(without) && remaining > 0; i++ {
-			if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, without[i], pr.title, pr.desc); err != nil {
-				return err
+		// First pass: fill the entire circle of winners (one per winner) before any second unit
+		if winnersCount > 0 {
+			firstRound := remaining
+			if firstRound > winnersCount {
+				firstRound = winnersCount
 			}
-			remaining--
+			for i := 0; i < firstRound; i++ {
+				uid := winners[(idx+i)%winnersCount]
+				if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, uid, pr.title, pr.desc); err != nil {
+					return err
+				}
+			}
+			idx += firstRound
+			remaining -= firstRound
 		}
-		// Round-robin second pass starting from place 1
+		// Round-robin for remaining units
 		for remaining > 0 && winnersCount > 0 {
 			uid := winners[idx%winnersCount]
 			if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, uid, pr.title, pr.desc); err != nil {
@@ -634,32 +640,37 @@ func (r *GiveawayRepository) FinishWithWinners(ctx context.Context, id string, w
 		}
 		uid := winners[place-1]
 		for _, pr := range list {
+			// Give one to the fixed-place winner
 			if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, uid, pr.title, pr.desc); err != nil {
 				return err
+			}
+			// Remaining quantity goes to loose distribution
+			if pr.qty > 1 {
+				loose = append(loose, prize{title: pr.title, desc: pr.desc, qty: pr.qty - 1})
 			}
 		}
 	}
 
-	// Winners without fixed
-	without := make([]int64, 0, winnersCount)
-	for place := 1; place <= winnersCount; place++ {
-		if len(fixed[place]) == 0 {
-			without = append(without, winners[place-1])
-		}
-	}
-	if len(without) > 1 {
-		rand.Shuffle(len(without), func(i, j int) { without[i], without[j] = without[j], without[i] })
-	}
+	// New strategy: fill the full circle of winners first, then continue round-robin
 
 	// Distribute loose prizes
 	idx := 0
 	for _, pr := range loose {
 		remaining := pr.qty
-		for i := 0; i < len(without) && remaining > 0; i++ {
-			if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, without[i], pr.title, pr.desc); err != nil {
-				return err
+		// First pass: one unit per winner until we cover all winners or run out
+		if winnersCount > 0 {
+			firstRound := remaining
+			if firstRound > winnersCount {
+				firstRound = winnersCount
 			}
-			remaining--
+			for i := 0; i < firstRound; i++ {
+				uid := winners[(idx+i)%winnersCount]
+				if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, uid, pr.title, pr.desc); err != nil {
+					return err
+				}
+			}
+			idx += firstRound
+			remaining -= firstRound
 		}
 		for remaining > 0 && winnersCount > 0 {
 			uid := winners[idx%winnersCount]
@@ -755,30 +766,34 @@ func (r *GiveawayRepository) SetManualWinners(ctx context.Context, id string, wi
 		}
 		uid := winners[place-1]
 		for _, pr := range list {
+			// Give one unit to fixed-place winner; distribute the rest as loose
 			if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, uid, pr.title, pr.desc); err != nil {
 				return err
 			}
+			if pr.qty > 1 {
+				loose = append(loose, prize{title: pr.title, desc: pr.desc, qty: pr.qty - 1})
+			}
 		}
 	}
 
-	// Winners without fixed
-	without := make([]int64, 0, winnersCount)
-	for place := 1; place <= winnersCount; place++ {
-		if len(fixed[place]) == 0 {
-			without = append(without, winners[place-1])
-		}
-	}
-
-	// Distribute loose prizes using first pass one-per and then round-robin
+	// Distribute loose prizes using first pass one-per across all winners and then round-robin
 	idx := 0
 	for _, pr := range loose {
 		remaining := pr.qty
-		// First pass: one per winner without fixed
-		for i := 0; i < len(without) && remaining > 0; i++ {
-			if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, without[i], pr.title, pr.desc); err != nil {
-				return err
+		// First pass: cover all winners once if possible
+		if winnersCount > 0 {
+			firstRound := remaining
+			if firstRound > winnersCount {
+				firstRound = winnersCount
 			}
-			remaining--
+			for i := 0; i < firstRound; i++ {
+				uid := winners[(idx+i)%winnersCount]
+				if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, uid, pr.title, pr.desc); err != nil {
+					return err
+				}
+			}
+			idx += firstRound
+			remaining -= firstRound
 		}
 		// Second pass: round-robin across all winners
 		for remaining > 0 && winnersCount > 0 {
