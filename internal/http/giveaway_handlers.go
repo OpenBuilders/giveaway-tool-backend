@@ -205,6 +205,9 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 			g.Requirements = append(g.Requirements, reqEntry)
 		case dg.RequirementTypeCustom:
 			g.Requirements = append(g.Requirements, dg.Requirement{Type: dg.RequirementTypeCustom, ChannelTitle: r.Name, Description: r.Description})
+		case dg.RequirementTypePremium:
+			// No extra fields required; carry optional name/description for UI
+			g.Requirements = append(g.Requirements, dg.Requirement{Type: dg.RequirementTypePremium, Title: r.Name, Description: r.Description})
 		case dg.RequirementTypeHoldTON:
 			g.Requirements = append(g.Requirements, dg.Requirement{Type: dg.RequirementTypeHoldTON, TonMinBalanceNano: r.TonMinBalanceNano, Title: r.Name, Description: r.Description})
 		case dg.RequirementTypeHoldJetton:
@@ -1209,6 +1212,21 @@ func (h *GiveawayHandlersFiber) checkSingleRequirement(c *fiber.Ctx, userID int6
 		return
 	case dg.RequirementTypeCustom:
 		res.Status = "success"
+		return
+	case dg.RequirementTypePremium:
+		// Prefer current request init-data; fallback to stored user flag
+		if v := c.Locals(middleware.IsPremiumCtxParam); v != nil {
+			if b, ok := v.(bool); ok && b {
+				res.Status = "success"
+				return
+			}
+		}
+		if h.users != nil {
+			if u, err := h.users.GetByID(c.Context(), userID); err == nil && u != nil && u.IsPremium {
+				res.Status = "success"
+				return
+			}
+		}
 		return
 	case dg.RequirementTypeHoldTON:
 		if h.users == nil || h.ton == nil {

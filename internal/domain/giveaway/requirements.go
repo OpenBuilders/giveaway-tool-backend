@@ -7,6 +7,7 @@ const (
 	RequirementTypeSubscription RequirementType = "subscription"
 	RequirementTypeBoost        RequirementType = "boost"
 	RequirementTypeCustom       RequirementType = "custom"
+	RequirementTypePremium      RequirementType = "premium"
 	// New on-chain requirements
 	RequirementTypeHoldTON    RequirementType = "holdton"
 	RequirementTypeHoldJetton RequirementType = "holdjetton"

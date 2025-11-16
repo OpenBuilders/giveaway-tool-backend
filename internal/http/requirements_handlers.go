@@ -1,15 +1,16 @@
 package http
 
 import (
+	"math/big"
+	"strconv"
+
 	"github.com/gofiber/fiber/v2"
 	mw "github.com/open-builders/giveaway-backend/internal/http/middleware"
+	channelsvc "github.com/open-builders/giveaway-backend/internal/service/channels"
 	tgsvc "github.com/open-builders/giveaway-backend/internal/service/telegram"
 	tonb "github.com/open-builders/giveaway-backend/internal/service/tonbalance"
 	usersvc "github.com/open-builders/giveaway-backend/internal/service/user"
-	channelsvc "github.com/open-builders/giveaway-backend/internal/service/channels"
 	tgutils "github.com/open-builders/giveaway-backend/internal/utils/telegram"
-	"math/big"
-	"strconv"
 )
 
 // RequirementsHandlers exposes available requirement types for the client.
@@ -36,6 +37,7 @@ func (h *RequirementsHandlers) listTemplates(c *fiber.Ctx) error {
 	return c.JSON([]fiber.Map{
 		{"type": "subscription", "name": "Channel Subscription", "description": "User must be a member of specified channels"},
 		{"type": "boost", "name": "Channel Boost", "description": "User must have active boost in specified channels"},
+		{"type": "premium", "name": "Be Telegram Premium", "description": "User must have Telegram Premium"},
 		{"type": "holdton", "name": "Hold TON", "description": "User must hold minimum TON balance"},
 		{"type": "holdjetton", "name": "Hold Jetton", "description": "User must hold minimum amount of specified jetton"},
 		{"type": "custom", "name": "Custom", "description": "User must fulfill custom requirement"},

@@ -10,6 +10,7 @@ type User struct {
 	FirstName     string    `json:"first_name"`
 	LastName      string    `json:"last_name"`
 	AvatarURL     string    `json:"avatar_url,omitempty"`
+	IsPremium     bool      `json:"is_premium"`
 	Role          string    `json:"role"`   // allowed: "user", "admin"
 	Status        string    `json:"status"` // allowed: "active", "banned"
 	WalletAddress string    `json:"wallet_address,omitempty"`

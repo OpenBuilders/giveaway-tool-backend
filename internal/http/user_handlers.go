@@ -95,10 +95,12 @@ func (h *UserHandlersFiber) getMe(c *fiber.Ctx) error {
 	lastName, _ := c.Locals(mw.LastNameCtxParam).(string)
 	username, _ := c.Locals(mw.UsernameCtxParam).(string)
 	photoURL, _ := c.Locals(mw.UserPicCtxParam).(string)
+	isPremium, _ := c.Locals(mw.IsPremiumCtxParam).(bool)
 	// Load existing user to preserve wallet and role if present
 	walletAddress := ""
 	role := "user"
 	currentAvatar := ""
+	currentIsPremium := false
 	if u, err := h.service.GetByID(c.Context(), userID); err == nil && u != nil {
 		if u.Role != "" {
 			role = u.Role
@@ -109,12 +111,18 @@ func (h *UserHandlersFiber) getMe(c *fiber.Ctx) error {
 		if u.AvatarURL != "" {
 			currentAvatar = u.AvatarURL
 		}
+		currentIsPremium = u.IsPremium
 	}
 
 	// Decide effective avatar to store/return
 	avatarURL := currentAvatar
 	if photoURL != "" && photoURL != currentAvatar {
 		avatarURL = photoURL
+	}
+	// Effective premium flag: trust current init-data boolean; if missing, keep DB value
+	effectivePremium := currentIsPremium
+	if isPremium != currentIsPremium {
+		effectivePremium = isPremium
 	}
 
 	// create or update user
@@ -124,6 +132,7 @@ func (h *UserHandlersFiber) getMe(c *fiber.Ctx) error {
 		LastName:      lastName,
 		Username:      username,
 		AvatarURL:     avatarURL,
+		IsPremium:     effectivePremium,
 		Role:          role,
 		Status:        "active",
 		WalletAddress: walletAddress,
@@ -137,6 +146,7 @@ func (h *UserHandlersFiber) getMe(c *fiber.Ctx) error {
 		LastName      string `json:"last_name"`
 		Username      string `json:"username"`
 		AvatarURL     string `json:"avatar_url"`
+		IsPremium     bool   `json:"is_premium"`
 		Role          string `json:"role"`
 		WalletAddress string `json:"wallet_address"`
 	}
@@ -147,6 +157,7 @@ func (h *UserHandlersFiber) getMe(c *fiber.Ctx) error {
 		LastName:      lastName,
 		Username:      username,
 		AvatarURL:     avatarURL,
+		IsPremium:     effectivePremium,
 		Role:          role,
 		WalletAddress: walletAddress,
 	})

@@ -19,8 +19,8 @@ func NewUserRepository(db *sql.DB) *UserRepository { return &UserRepository{db: 
 // Upsert inserts or updates a user by ID. Username uniqueness is case-insensitive when present.
 func (r *UserRepository) Upsert(ctx context.Context, u *domain.User) error {
 	const q = `
-	INSERT INTO users (id, username, first_name, last_name, role, status, avatar_url, wallet_address, created_at, updated_at)
-	VALUES ($1, lower(NULLIF($2, '')), $3, $4, $5, $6, NULLIF($7, ''), lower(NULLIF($8, '')), COALESCE($9, now()), COALESCE($10, now()))
+	INSERT INTO users (id, username, first_name, last_name, role, status, avatar_url, is_premium, wallet_address, created_at, updated_at)
+	VALUES ($1, lower(NULLIF($2, '')), $3, $4, $5, $6, NULLIF($7, ''), $8, lower(NULLIF($9, '')), COALESCE($10, now()), COALESCE($11, now()))
 	ON CONFLICT (id) DO UPDATE SET
 		username = EXCLUDED.username,
 		first_name = EXCLUDED.first_name,
@@ -28,6 +28,7 @@ func (r *UserRepository) Upsert(ctx context.Context, u *domain.User) error {
 		role = EXCLUDED.role,
 		status = EXCLUDED.status,
 		avatar_url = COALESCE(EXCLUDED.avatar_url, users.avatar_url),
+		is_premium = EXCLUDED.is_premium,
 		wallet_address = COALESCE(EXCLUDED.wallet_address, users.wallet_address),
 		updated_at = now();
 `
@@ -39,6 +40,7 @@ func (r *UserRepository) Upsert(ctx context.Context, u *domain.User) error {
 		u.Role,
 		u.Status,
 		u.AvatarURL,
+		u.IsPremium,
 		u.WalletAddress,
 		u.CreatedAt,
 		u.UpdatedAt,
@@ -48,10 +50,10 @@ func (r *UserRepository) Upsert(ctx context.Context, u *domain.User) error {
 
 // GetByID returns a user by Telegram ID.
 func (r *UserRepository) GetByID(ctx context.Context, id int64) (*domain.User, error) {
-	const q = `SELECT id, username, first_name, last_name, COALESCE(avatar_url, ''), role, status, COALESCE(wallet_address, ''), created_at, updated_at FROM users WHERE id=$1`
+	const q = `SELECT id, username, first_name, last_name, COALESCE(avatar_url, ''), is_premium, role, status, COALESCE(wallet_address, ''), created_at, updated_at FROM users WHERE id=$1`
 	row := r.db.QueryRowContext(ctx, q, id)
 	var u domain.User
-	if err := row.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.AvatarURL, &u.Role, &u.Status, &u.WalletAddress, &u.CreatedAt, &u.UpdatedAt); err != nil {
+	if err := row.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.AvatarURL, &u.IsPremium, &u.Role, &u.Status, &u.WalletAddress, &u.CreatedAt, &u.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -63,13 +65,13 @@ func (r *UserRepository) GetByID(ctx context.Context, id int64) (*domain.User, e
 // GetByUsername returns a user by username (case-insensitive). Returns nil if not found.
 func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*domain.User, error) {
 	const q = `
-SELECT id, username, first_name, last_name, COALESCE(avatar_url, ''), role, status, COALESCE(wallet_address, ''), created_at, updated_at
+SELECT id, username, first_name, last_name, COALESCE(avatar_url, ''), is_premium, role, status, COALESCE(wallet_address, ''), created_at, updated_at
 FROM users
 WHERE lower(username) = lower($1)
 `
 	row := r.db.QueryRowContext(ctx, q, username)
 	var u domain.User
-	if err := row.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.AvatarURL, &u.Role, &u.Status, &u.WalletAddress, &u.CreatedAt, &u.UpdatedAt); err != nil {
+	if err := row.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.AvatarURL, &u.IsPremium, &u.Role, &u.Status, &u.WalletAddress, &u.CreatedAt, &u.UpdatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -87,7 +89,7 @@ func (r *UserRepository) List(ctx context.Context, limit, offset int) ([]domain.
 		offset = 0
 	}
 	const q = `
-SELECT id, username, first_name, last_name, COALESCE(avatar_url, ''), role, status, COALESCE(wallet_address, ''), created_at, updated_at
+SELECT id, username, first_name, last_name, COALESCE(avatar_url, ''), is_premium, role, status, COALESCE(wallet_address, ''), created_at, updated_at
 FROM users
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2`
@@ -100,7 +102,7 @@ LIMIT $1 OFFSET $2`
 	var users []domain.User
 	for rows.Next() {
 		var u domain.User
-		if err := rows.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.AvatarURL, &u.Role, &u.Status, &u.WalletAddress, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if err := rows.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.AvatarURL, &u.IsPremium, &u.Role, &u.Status, &u.WalletAddress, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			return nil, err
 		}
 		users = append(users, u)
