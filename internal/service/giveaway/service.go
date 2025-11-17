@@ -83,9 +83,9 @@ func (s *Service) Create(ctx context.Context, g *dg.Giveaway) (string, error) {
 		return "", err
 	}
 	// Best-effort notification to creator channels
-	if s.ntf != nil {
-		go s.ntf.NotifyStarted(context.Background(), g)
-	}
+	// if s.ntf != nil {
+	// 	go s.ntf.NotifyStarted(context.Background(), g)
+	// }
 	return id, nil
 }
 

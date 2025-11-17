@@ -52,6 +52,8 @@ type Giveaway struct {
 	Requirements      []Requirement  `json:"requirements,omitempty"`
 	Winners           []Winner       `json:"winners,omitempty"`
 	ParticipantsCount int            `json:"participants_count"`
+	// PreparedInlineMessageID stores the ID returned by Telegram savePreparedInlineMessage
+	PreparedInlineMessageID string `json:"-"`
 }
 
 // WinnerPrize describes a prize assigned to a winner.

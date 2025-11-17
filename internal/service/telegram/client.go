@@ -315,7 +315,7 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text string, par
 func (c *Client) SendAnimation(ctx context.Context, chatID int64, animation string, caption string, parseMode string, buttonText string, buttonURL string) error {
 	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/sendAnimation", c.token)
 	data := url.Values{
-		"chat_id":  {fmt.Sprintf("%d", chatID)},
+		"chat_id":   {fmt.Sprintf("%d", chatID)},
 		"animation": {animation},
 	}
 	if caption != "" {
@@ -577,4 +577,204 @@ func (c *Client) GetBotMemberStatus(ctx context.Context, chat string) (string, b
 	status := response.Result.Status
 	can := status == "administrator" || status == "creator" || response.Result.CanManageChat || response.Result.CanRestrictMembers || response.Result.CanDeleteMessages
 	return status, can, nil
+}
+
+// SavePreparedInlineMessageArticle calls savePreparedInlineMessage with an InlineQueryResultArticle payload
+// and returns the prepared inline message ID. See Telegram docs:
+// https://core.telegram.org/bots/api#savepreparedinlinemessage
+func (c *Client) SavePreparedInlineMessageArticle(ctx context.Context, userID int64, title string, messageHTML string, buttonText string, buttonURL string) (string, error) {
+	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/savePreparedInlineMessage", c.token)
+	// Build InlineKeyboard if provided
+	var replyMarkup any
+	if buttonText != "" && buttonURL != "" {
+		replyMarkup = map[string]any{
+			"inline_keyboard": [][]map[string]string{
+				{
+					{"text": buttonText, "url": buttonURL},
+				},
+			},
+		}
+	}
+	// InlineQueryResultArticle with minimal required fields
+	result := map[string]any{
+		"type":  "article",
+		"id":    fmt.Sprintf("g-%d-%d", userID, time.Now().UnixNano()),
+		"title": title,
+		"input_message_content": map[string]any{
+			"message_text": messageHTML,
+			"parse_mode":   "HTML",
+		},
+	}
+	if replyMarkup != nil {
+		result["reply_markup"] = replyMarkup
+	}
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		return "", err
+	}
+	data := url.Values{
+		"user_id": {fmt.Sprintf("%d", userID)},
+		"result":  {string(resultJSON)},
+	}
+	// Telegram requires at least one allowed chat type
+	data.Set("allow_user_chats", "true")
+	data.Set("allow_group_chats", "true")
+	data.Set("allow_channel_chats", "true")
+	// Log request (without token)
+	if c.logger != nil {
+		c.logger.Printf("Telegram: savePreparedInlineMessage request user_id=%d title=%q button_text=%q button_url=%q", userID, title, buttonText, buttonURL)
+	}
+	// Response may return a struct with id or inline_message_id; be tolerant
+	var resp struct {
+		Ok          bool           `json:"ok"`
+		Description string         `json:"description"`
+		Result      map[string]any `json:"result"`
+	}
+	if err := c.makeRequest(ctx, http.MethodPost, endpoint, data, &resp); err != nil {
+		if c.logger != nil {
+			c.logger.Printf("Telegram: savePreparedInlineMessage error: %v", err)
+		}
+		return "", err
+	}
+	if !resp.Ok {
+		if resp.Description == "" {
+			resp.Description = "telegram API error"
+		}
+		if c.logger != nil {
+			raw, _ := json.Marshal(resp.Result)
+			c.logger.Printf("Telegram: savePreparedInlineMessage failed: %s; result=%s", resp.Description, string(raw))
+		}
+		return "", fmt.Errorf(resp.Description)
+	}
+	// Extract id field
+	if resp.Result == nil {
+		if c.logger != nil {
+			c.logger.Printf("Telegram: savePreparedInlineMessage empty result")
+		}
+		return "", fmt.Errorf("empty result")
+	}
+	// Common possible keys
+	var extracted string
+	for _, key := range []string{"id", "inline_message_id", "prepared_inline_message_id"} {
+		if v, ok := resp.Result[key]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				extracted = s
+				break
+			}
+		}
+	}
+	// Fallback: try stringify first non-empty string value
+	if extracted == "" {
+		for _, v := range resp.Result {
+			if s, ok := v.(string); ok && s != "" {
+				extracted = s
+				break
+			}
+		}
+	}
+	if extracted == "" {
+		if c.logger != nil {
+			raw, _ := json.Marshal(resp.Result)
+			c.logger.Printf("Telegram: savePreparedInlineMessage id not found in result=%s", string(raw))
+		}
+		return "", fmt.Errorf("prepared inline message id not found")
+	}
+	if c.logger != nil {
+		raw, _ := json.Marshal(resp.Result)
+		c.logger.Printf("Telegram: savePreparedInlineMessage success id=%s result=%s", extracted, string(raw))
+	}
+	return extracted, nil
+}
+
+// SavePreparedInlineMessageGif creates a prepared inline message using an animated GIF with a caption.
+// This mimics SendAnimation used elsewhere, but via savePreparedInlineMessage with InlineQueryResultGif.
+func (c *Client) SavePreparedInlineMessageGif(ctx context.Context, userID int64, gifURL string, thumbnailURL string, captionHTML string, buttonText string, buttonURL string) (string, error) {
+	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/savePreparedInlineMessage", c.token)
+	// Inline keyboard
+	var replyMarkup any
+	if buttonText != "" && buttonURL != "" {
+		replyMarkup = map[string]any{
+			"inline_keyboard": [][]map[string]string{
+				{
+					{"text": buttonText, "url": buttonURL},
+				},
+			},
+		}
+	}
+	// InlineQueryResultGif payload
+	result := map[string]any{
+		"type":    "gif",
+		"id":      fmt.Sprintf("g-%d-%d", userID, time.Now().UnixNano()),
+		"gif_url": gifURL,
+	}
+	// Some API versions require a thumbnail; set both keys for compatibility
+	if thumbnailURL == "" {
+		thumbnailURL = gifURL
+	}
+	result["thumbnail_url"] = thumbnailURL
+	result["thumb_url"] = thumbnailURL
+	if captionHTML != "" {
+		result["caption"] = captionHTML
+		result["parse_mode"] = "HTML"
+	}
+	if replyMarkup != nil {
+		result["reply_markup"] = replyMarkup
+	}
+	body, err := json.Marshal(result)
+	if err != nil {
+		return "", err
+	}
+	data := url.Values{
+		"user_id": {fmt.Sprintf("%d", userID)},
+		"result":  {string(body)},
+	}
+	// Allow in main chat types
+	data.Set("allow_user_chats", "true")
+	data.Set("allow_group_chats", "true")
+	data.Set("allow_channel_chats", "true")
+	if c.logger != nil {
+		c.logger.Printf("Telegram: savePreparedInlineMessage (gif) request user_id=%d gif_url=%q", userID, gifURL)
+	}
+	var resp struct {
+		Ok          bool           `json:"ok"`
+		Description string         `json:"description"`
+		Result      map[string]any `json:"result"`
+	}
+	if err := c.makeRequest(ctx, http.MethodPost, endpoint, data, &resp); err != nil {
+		if c.logger != nil {
+			c.logger.Printf("Telegram: savePreparedInlineMessage (gif) error: %v", err)
+		}
+		return "", err
+	}
+	if !resp.Ok {
+		if resp.Description == "" {
+			resp.Description = "telegram API error"
+		}
+		if c.logger != nil {
+			raw, _ := json.Marshal(resp.Result)
+			c.logger.Printf("Telegram: savePreparedInlineMessage (gif) failed: %s; result=%s", resp.Description, string(raw))
+		}
+		return "", fmt.Errorf(resp.Description)
+	}
+	if resp.Result == nil {
+		return "", fmt.Errorf("empty result")
+	}
+	// Extract ID
+	for _, key := range []string{"id", "inline_message_id", "prepared_inline_message_id"} {
+		if v, ok := resp.Result[key]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				if c.logger != nil {
+					c.logger.Printf("Telegram: savePreparedInlineMessage (gif) success, %s=%s", key, s)
+				}
+				return s, nil
+			}
+		}
+	}
+	// Fallback
+	for _, v := range resp.Result {
+		if s, ok := v.(string); ok && s != "" {
+			return s, nil
+		}
+	}
+	return "", fmt.Errorf("prepared inline message id not found")
 }

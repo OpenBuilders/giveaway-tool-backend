@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"math/rand"
 	"strconv"
@@ -44,6 +45,7 @@ func NewGiveawayHandlersFiber(svc *gsvc.Service, chs *chsvc.Service, tg *tgsvc.C
 func (h *GiveawayHandlersFiber) RegisterFiber(r fiber.Router) {
 	r.Post("/giveaways", h.create)
 	r.Get("/giveaways/:id", h.getByID)
+	r.Post("/giveaways/:id/prepare-message", h.prepareInlineMessage)
 	r.Get("/giveaways/:id/list-loaded-winners", h.listWinnersWithPrizes)
 	r.Get("/giveaways/:id/stats.csv", h.exportWinnersCSV)
 	r.Get("/giveaways/:id/export-link", h.generateExportLink)
@@ -269,7 +271,194 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"id": id})
+	// Include prepared inline message id from Redis cache in create response (creator only)
+	msgID := ""
+	if h.rdb != nil {
+		if v, e := h.rdb.Get(c.Context(), "giveaway:"+id+":prepared_inline_message_id").Result(); e == nil {
+			msgID = v
+		}
+	}
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"id": id, "msg_id": msgID})
+}
+
+// prepareInlineMessage prepares (or returns cached) prepared inline message for a giveaway.
+// Access: only giveaway owner. Caches result in Redis for 50 minutes.
+func (h *GiveawayHandlersFiber) prepareInlineMessage(c *fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "missing id"})
+	}
+	requesterID := middleware.GetUserID(c)
+	if requesterID == 0 {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	// Load giveaway
+	g, err := h.service.GetByID(c.Context(), id)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	if g == nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "not found"})
+	}
+	// Only owner allowed
+	if g.CreatorID != requesterID {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "forbidden"})
+	}
+	// Redis cache
+	if h.rdb == nil || h.telegram == nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "service not configured"})
+	}
+	cacheKey := "giveaway:" + id + ":prepared_inline_message_id"
+	if v, err := h.rdb.Get(c.Context(), cacheKey).Result(); err == nil && v != "" {
+		return c.JSON(fiber.Map{"msg_id": v, "cached": true})
+	}
+	// Build startapp URL via bot username
+	startURL := ""
+	if me, err := h.telegram.GetBotMe(c.Context(), h.rdb); err == nil && me != nil && me.Username != "" {
+		startURL = fmt.Sprintf("https://t.me/%s?startapp=%s", me.Username, g.ID)
+	}
+	// Build the same text as in NotifyStarted
+	text := buildStartMessageForPrepare(g)
+	// Use the same GIF as announcement
+	const startedGIF = "https://cdn.giveaway.tools.tg/assets/Started.gif"
+	// Use GIF as thumbnail fallback to satisfy Bot API requirements
+	msgID, err := h.telegram.SavePreparedInlineMessageGif(c.Context(), g.CreatorID, startedGIF, startedGIF, text, "Open Giveaway", startURL)
+	if err != nil || msgID == "" {
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "failed to prepare message"})
+	}
+	// Cache for 50 minutes
+	_ = h.rdb.SetEx(c.Context(), cacheKey, msgID, 50*time.Minute).Err()
+	return c.JSON(fiber.Map{"msg_id": msgID, "cached": false})
+}
+
+// buildStartMessageForPrepare replicates the start message format used in notifications.
+func buildStartMessageForPrepare(g *dg.Giveaway) string {
+	var b strings.Builder
+	b.WriteString("🎁 Giveaway is live!\n\n")
+	b.WriteString("Details:\n")
+	// Subscribe line from sponsors
+	subs := collectSponsorsUsernamesForPrepare(g)
+	if subs != "" {
+		b.WriteString("Subscribe: ")
+		b.WriteString(subs)
+		b.WriteString("\n")
+	}
+	// Deadline
+	b.WriteString("Deadline: ")
+	b.WriteString(g.EndsAt.UTC().Format("02 Jan 2006 15:04 UTC"))
+	b.WriteString("\n")
+	// Prizes
+	prizes := collectPrizeTitlesForPrepare(g)
+	if prizes != "" {
+		b.WriteString("Prizes: ")
+		b.WriteString(prizes)
+		b.WriteString("\n\n")
+	} else {
+		b.WriteString("\n")
+	}
+	// Requirements
+	req := buildRequirementsBlockForPrepare(g)
+	if req != "" {
+		b.WriteString("Requirements:\n")
+		b.WriteString(req)
+		b.WriteString("\n")
+	}
+	b.WriteString("Participants can now join this giveaway. Good luck!")
+	return b.String()
+}
+
+func collectSponsorsUsernamesForPrepare(g *dg.Giveaway) string {
+	if g == nil || len(g.Sponsors) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(g.Sponsors))
+	for _, s := range g.Sponsors {
+		if s.Username != "" {
+			names = append(names, "@"+s.Username)
+		} else if s.Title != "" {
+			names = append(names, s.Title)
+		}
+	}
+	return strings.Join(names, ", ")
+}
+
+func collectPrizeTitlesForPrepare(g *dg.Giveaway) string {
+	if g == nil || len(g.Prizes) == 0 {
+		return ""
+	}
+	titles := make([]string, 0, len(g.Prizes))
+	for _, p := range g.Prizes {
+		if p.Title != "" {
+			titles = append(titles, p.Title)
+		}
+	}
+	return strings.Join(titles, ", ")
+}
+
+func buildRequirementsBlockForPrepare(g *dg.Giveaway) string {
+	if g == nil || len(g.Requirements) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range g.Requirements {
+		switch r.Type {
+		case dg.RequirementTypeSubscription:
+			if r.ChannelUsername != "" {
+				b.WriteString("• Subscribe to @")
+				b.WriteString(r.ChannelUsername)
+			} else if r.ChannelTitle != "" {
+				b.WriteString("• Subscribe to ")
+				b.WriteString(r.ChannelTitle)
+			} else {
+				b.WriteString("• Subscribe to the channel")
+			}
+			b.WriteString("\n")
+		case dg.RequirementTypeBoost:
+			if r.ChannelUsername != "" {
+				b.WriteString("• Boost @")
+				b.WriteString(r.ChannelUsername)
+			} else {
+				b.WriteString("• Boost the channel")
+			}
+			b.WriteString("\n")
+		case dg.RequirementTypeHoldTON:
+			if r.TonMinBalanceNano > 0 {
+				tons := float64(r.TonMinBalanceNano) / 1_000_000_000
+				rounded := math.Round(tons*1000) / 1000
+				// format without trailing zeros; up to 3 decimals after rounding
+				tonsStr := strconv.FormatFloat(rounded, 'f', -1, 64)
+				b.WriteString(fmt.Sprintf("• Minimum TON balance: %s TON\n", tonsStr))
+			}
+		case dg.RequirementTypeHoldJetton:
+			if r.JettonAddress != "" {
+				if r.JettonMinAmount > 0 {
+					b.WriteString(fmt.Sprintf("• Hold jetton %s ≥ %d\n", r.JettonAddress, r.JettonMinAmount))
+				} else {
+					b.WriteString(fmt.Sprintf("• Hold jetton %s\n", r.JettonAddress))
+				}
+			}
+		case dg.RequirementTypeCustom:
+			if r.Title != "" || r.Description != "" {
+				b.WriteString("• ")
+				if r.Title != "" {
+					b.WriteString(r.Title)
+					if r.Description != "" {
+						b.WriteString(": ")
+						b.WriteString(r.Description)
+					}
+				} else {
+					b.WriteString(r.Description)
+				}
+				b.WriteString("\n")
+			}
+		case dg.RequirementTypePremium:
+			b.WriteString("• Telegram Premium user\n")
+		}
+	}
+	return b.String()
 }
 
 func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
@@ -339,6 +528,7 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 		Winners           []winnerDTO       `json:"winners,omitempty"`
 		ParticipantsCount int               `json:"participants_count"`
 		UserRole          string            `json:"user_role,omitempty"`
+		MsgID             string            `json:"msg_id,omitempty"`
 	}
 	// Map requirements to requested API shape
 	reqs := make([]requirementDTO, 0, len(g.Requirements))
@@ -441,6 +631,12 @@ func (h *GiveawayHandlersFiber) getByID(c *fiber.Ctx) error {
 		Winners:           enrichedWinners,
 		ParticipantsCount: g.ParticipantsCount,
 		UserRole:          userRole,
+	}
+	// Only owner sees msg_id
+	if userRole == "owner" && h.rdb != nil {
+		if v, e := h.rdb.Get(c.Context(), "giveaway:"+g.ID+":prepared_inline_message_id").Result(); e == nil {
+			dto.MsgID = v
+		}
 	}
 	return c.JSON(dto)
 }
