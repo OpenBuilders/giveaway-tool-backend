@@ -37,7 +37,7 @@ type ChannelInfo struct {
 // Giveaway is the aggregate representing a giveaway created by a user.
 type Giveaway struct {
 	ID                string         `json:"id"`
-	CreatorID         int64          `json:"creator_id"`
+	CreatorID         int64          `json:"-"`
 	Title             string         `json:"title"`
 	Description       string         `json:"description"`
 	StartedAt         time.Time      `json:"started_at"`

@@ -19,6 +19,7 @@ import (
 	notify "github.com/open-builders/giveaway-backend/internal/service/notifications"
 	tg "github.com/open-builders/giveaway-backend/internal/service/telegram"
 	usersvc "github.com/open-builders/giveaway-backend/internal/service/user"
+	"github.com/open-builders/giveaway-backend/internal/workers"
 	migfs "github.com/open-builders/giveaway-backend/migrations"
 	"github.com/pressly/goose/v3"
 )
@@ -89,6 +90,11 @@ func main() {
 			}
 		}
 	}()
+
+	// Start Redis stream worker
+	streamWorker := workers.NewRedisStreamWorker(rdb, expRepo)
+	go streamWorker.Start(ctx)
+
 	go func() {
 		log.Printf("HTTP server (Fiber) listening on %s", cfg.HTTPAddr)
 		if err := app.Listen(cfg.HTTPAddr); err != nil {

@@ -74,6 +74,15 @@ func (s *Service) UpdateWallet(ctx context.Context, id int64, wallet string) err
 	if id == 0 || wallet == "" {
 		return errors.New("invalid args")
 	}
+	// Check uniqueness
+	existing, err := s.repo.GetByWalletAddress(ctx, wallet)
+	if err != nil {
+		return err
+	}
+	if existing != nil && existing.ID != id {
+		return errors.New("wallet already linked to another account")
+	}
+
 	// Fetch existing and upsert with wallet
 	u, err := s.repo.GetByID(ctx, id)
 	if err != nil {

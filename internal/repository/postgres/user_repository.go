@@ -80,6 +80,24 @@ WHERE lower(username) = lower($1)
 	return &u, nil
 }
 
+// GetByWalletAddress returns a user by wallet address (case-insensitive). Returns nil if not found.
+func (r *UserRepository) GetByWalletAddress(ctx context.Context, wallet string) (*domain.User, error) {
+	const q = `
+SELECT id, username, first_name, last_name, COALESCE(avatar_url, ''), is_premium, role, status, COALESCE(wallet_address, ''), created_at, updated_at
+FROM users
+WHERE lower(wallet_address) = lower($1)
+`
+	row := r.db.QueryRowContext(ctx, q, wallet)
+	var u domain.User
+	if err := row.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.AvatarURL, &u.IsPremium, &u.Role, &u.Status, &u.WalletAddress, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &u, nil
+}
+
 // List returns users with pagination ordered by created_at desc.
 func (r *UserRepository) List(ctx context.Context, limit, offset int) ([]domain.User, error) {
 	if limit <= 0 || limit > 1000 {

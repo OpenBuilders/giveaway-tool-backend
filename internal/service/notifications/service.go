@@ -33,6 +33,12 @@ func (s *Service) NotifyStarted(ctx context.Context, g *dg.Giveaway) {
 	}
 	// Build message
 	text := buildStartMessage(g)
+	animationID := "https://cdn.giveaway.tools.tg/assets/Started.gif"
+	if s.rdb != nil {
+		if v, err := s.rdb.Get(ctx, "tg:file_id:animation:started").Result(); err == nil && v != "" {
+			animationID = v
+		}
+	}
 	// Button URL: link to current bot username
 	btnURL := ""
 	if s.rdb != nil {
@@ -46,7 +52,7 @@ func (s *Service) NotifyStarted(ctx context.Context, g *dg.Giveaway) {
 		if ch.ID == 0 {
 			continue
 		}
-		_ = s.tg.SendAnimation(ctx, ch.ID, "https://cdn.giveaway.tools.tg/assets/Started.gif", text, "HTML", "Open Giveaway", btnURL)
+		_ = s.tg.SendAnimation(ctx, ch.ID, animationID, text, "HTML", "Open Giveaway", btnURL)
 	}
 }
 
@@ -56,13 +62,19 @@ func (s *Service) NotifyCompleted(ctx context.Context, g *dg.Giveaway, winnersSe
 		return
 	}
 	text := buildCompletedMessage(g, winnersSelected)
+	animationID := "https://cdn.giveaway.tools.tg/assets/Finished.gif"
+	if s.rdb != nil {
+		if v, err := s.rdb.Get(ctx, "tg:file_id:animation:finished").Result(); err == nil && v != "" {
+			animationID = v
+		}
+	}
 	btnURL := s.buildWebAppURL(g.ID)
 	// Send to sponsor channels
 	for _, ch := range g.Sponsors {
 		if ch.ID == 0 {
 			continue
 		}
-		_ = s.tg.SendAnimation(ctx, ch.ID, "https://cdn.giveaway.tools.tg/assets/Finished.gif", text, "HTML", "View Results", btnURL)
+		_ = s.tg.SendAnimation(ctx, ch.ID, animationID, text, "HTML", "View Results", btnURL)
 	}
 }
 

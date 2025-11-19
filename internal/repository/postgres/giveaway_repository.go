@@ -969,3 +969,17 @@ func (r *GiveawayRepository) ListActive(ctx context.Context, limit, offset, minP
 	}
 	return out, rows.Err()
 }
+
+// RemoveRequirementsByChannelID removes any requirements that depend on the given channel ID.
+// Only deletes requirements for giveaways that are not yet finished (active, scheduled, pending).
+func (r *GiveawayRepository) RemoveRequirementsByChannelID(ctx context.Context, channelID int64) error {
+	const q = `
+		DELETE FROM giveaway_requirements gr
+		USING giveaways g
+		WHERE gr.giveaway_id = g.id
+		  AND gr.channel_id = $1
+		  AND gr.type IN ('subscription', 'boost')
+		  AND g.status IN ('active')`
+	_, err := r.db.ExecContext(ctx, q, channelID)
+	return err
+}
