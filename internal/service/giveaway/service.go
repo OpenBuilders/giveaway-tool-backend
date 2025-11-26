@@ -82,10 +82,6 @@ func (s *Service) Create(ctx context.Context, g *dg.Giveaway) (string, error) {
 	if err := s.repo.Create(ctx, g); err != nil {
 		return "", err
 	}
-	// Best-effort notification to creator channels
-	if s.ntf != nil {
-		go s.ntf.NotifyStarted(context.Background(), g)
-	}
 	return id, nil
 }
 
@@ -188,7 +184,7 @@ func (s *Service) UpdateStatus(ctx context.Context, id string, status dg.Giveawa
 		if g.Status != dg.GiveawayStatusPending {
 			return errors.New("transition not allowed")
 		}
-		// Perform status update and then notify sponsors and winners
+		// Perform status update and then notify winners via DM
 		if err := s.repo.UpdateStatus(ctx, id, status); err != nil {
 			return err
 		}
@@ -198,14 +194,13 @@ func (s *Service) UpdateStatus(ctx context.Context, id string, status dg.Giveawa
 				if gg, err := s.repo.GetByID(context.Background(), giv.ID); err == nil && gg != nil {
 					giv = gg
 				}
-				// Load winners and notify
+				// Load winners and notify via DM only
 				w, err := s.repo.ListWinnersWithPrizes(context.Background(), giv.ID)
 				if err == nil && len(w) > 0 {
-					s.ntf.NotifyWinnersSelected(context.Background(), giv, w)
-				} else {
-					// fallback to simple completed message
-					s.ntf.NotifyCompleted(context.Background(), giv, 0)
+					s.ntf.NotifyWinnersDM(context.Background(), giv, w)
 				}
+				// Notify creator that giveaway is completed
+				s.ntf.NotifyCreatorCompleted(context.Background(), giv)
 			}(g)
 		}
 		return nil
@@ -351,9 +346,9 @@ func (s *Service) FinishOneWithDistribution(ctx context.Context, id string) erro
 			if err := s.repo.UpdateStatus(ctx, id, dg.GiveawayStatusPending); err != nil {
 				return err
 			}
-			// Notify pending to sponsors
+			// Notify creator that action is required
 			if s.ntf != nil {
-				go s.ntf.NotifyPending(context.Background(), g)
+				go s.ntf.NotifyCreatorPending(context.Background(), g)
 			}
 			return nil
 		}
@@ -365,16 +360,15 @@ func (s *Service) FinishOneWithDistribution(ctx context.Context, id string) erro
 	if err := s.repo.FinishOneWithDistribution(ctx, id, winnersCount); err != nil {
 		return err
 	}
-	// Best-effort completion notification with winners list + DMs
+	// Best-effort DM notification to winners only
 	if s.ntf != nil {
 		go func(giv *dg.Giveaway) {
 			winners, err := s.repo.ListWinnersWithPrizes(context.Background(), giv.ID)
 			if err == nil && len(winners) > 0 {
-				s.ntf.NotifyWinnersSelected(context.Background(), giv, winners)
-			} else {
-				// fallback to simple completed message
-				s.ntf.NotifyCompleted(context.Background(), giv, winnersCount)
+				s.ntf.NotifyWinnersDM(context.Background(), giv, winners)
 			}
+			// Notify creator that giveaway is completed
+			s.ntf.NotifyCreatorCompleted(context.Background(), giv)
 		}(g)
 	}
 	return nil
@@ -505,13 +499,15 @@ func (s *Service) FinalizePendingWithCandidates(ctx context.Context, id string, 
 	if err := s.repo.FinishWithWinners(ctx, id, winners); err != nil {
 		return accepted, len(winners), err
 	}
-	// Notify sponsors and DM winners
+	// DM winners only
 	if s.ntf != nil {
 		go func(giv *dg.Giveaway) {
 			w, err := s.repo.ListWinnersWithPrizes(context.Background(), giv.ID)
 			if err == nil && len(w) > 0 {
-				s.ntf.NotifyWinnersSelected(context.Background(), giv, w)
+				s.ntf.NotifyWinnersDM(context.Background(), giv, w)
 			}
+			// Notify creator that giveaway is completed
+			s.ntf.NotifyCreatorCompleted(context.Background(), giv)
 		}(g)
 	}
 	return accepted, len(winners), nil
@@ -603,13 +599,15 @@ func (s *Service) FinalizeWithWinners(ctx context.Context, id string, winners []
 	if err := s.repo.FinishWithWinners(ctx, id, filtered); err != nil {
 		return err
 	}
-	// Notify sponsors and DM winners
+	// DM winners only
 	if s.ntf != nil {
 		go func(giv *dg.Giveaway) {
 			w, err := s.repo.ListWinnersWithPrizes(context.Background(), giv.ID)
 			if err == nil && len(w) > 0 {
-				s.ntf.NotifyWinnersSelected(context.Background(), giv, w)
+				s.ntf.NotifyWinnersDM(context.Background(), giv, w)
 			}
+			// Notify creator that giveaway is completed
+			s.ntf.NotifyCreatorCompleted(context.Background(), giv)
 		}(g)
 	}
 	return nil

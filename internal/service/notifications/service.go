@@ -176,6 +176,43 @@ func (s *Service) NotifyWinnersSelected(ctx context.Context, g *dg.Giveaway, win
 	}
 }
 
+// NotifyWinnersDM sends DM notifications to winners only (no channel posts).
+func (s *Service) NotifyWinnersDM(ctx context.Context, g *dg.Giveaway, winners []dg.Winner) {
+	if s == nil || s.tg == nil || g == nil || len(winners) == 0 {
+		return
+	}
+	// DM winners with small delay between sends
+	startURL := s.buildStartAppURL(g.ID)
+	for i, w := range winners {
+		go func(idx int, uid int64) {
+			// Spread sends a bit to avoid burst
+			time.Sleep(time.Duration(250+idx*150) * time.Millisecond)
+			msg := fmt.Sprintf("🎉 You won in “%s”!\nOpen the app to view details.", g.Title)
+			_ = s.tg.SendMessage(context.Background(), uid, msg, "HTML", "Open Giveaway", startURL, true)
+		}(i, w.UserID)
+	}
+}
+
+// NotifyCreatorCompleted sends a DM to the giveaway creator when the giveaway is completed.
+func (s *Service) NotifyCreatorCompleted(ctx context.Context, g *dg.Giveaway) {
+	if s == nil || s.tg == nil || g == nil || g.CreatorID == 0 {
+		return
+	}
+	msg := fmt.Sprintf("✅ Your giveaway \"%s\" has been completed.\n\nWinners have been selected and notified.", g.Title)
+	btnURL := s.buildWebAppURL(g.ID)
+	_ = s.tg.SendMessage(ctx, g.CreatorID, msg, "HTML", "View Giveaway", btnURL, true)
+}
+
+// NotifyCreatorPending sends a DM to the giveaway creator when the giveaway is pending and requires action.
+func (s *Service) NotifyCreatorPending(ctx context.Context, g *dg.Giveaway) {
+	if s == nil || s.tg == nil || g == nil || g.CreatorID == 0 {
+		return
+	}
+	msg := fmt.Sprintf("⏳ Your giveaway \"%s\" has ended and is now pending.\n\nAction required: Please review participants, verify custom requirements, and finalize the giveaway to distribute prizes.", g.Title)
+	btnURL := s.buildWebAppURL(g.ID)
+	_ = s.tg.SendMessage(ctx, g.CreatorID, msg, "HTML", "Open Giveaway", btnURL, true)
+}
+
 func buildStartMessage(g *dg.Giveaway) string {
 	var b strings.Builder
 	b.WriteString("🎁 Giveaway is live!\n\n")
