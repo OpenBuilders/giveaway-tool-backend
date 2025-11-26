@@ -115,6 +115,20 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid json"})
 	}
 
+	// Validate negative values
+	if req.Duration < 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "duration cannot be negative"})
+	}
+	if req.WinnersCount < 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "winners_count cannot be negative"})
+	}
+
+	// Validate maximum duration (2 months = 60 days = 5184000 seconds)
+	const maxDurationSeconds = 60 * 24 * 60 * 60 // 60 days in seconds
+	if req.Duration > maxDurationSeconds {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "duration cannot exceed 2 months (60 days)"})
+	}
+
 	// Build domain model
 	now := time.Now().UTC()
 	g := dg.Giveaway{
@@ -211,14 +225,23 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 			// No extra fields required; carry optional name/description for UI
 			g.Requirements = append(g.Requirements, dg.Requirement{Type: dg.RequirementTypePremium, Title: r.Name, Description: r.Description})
 		case dg.RequirementTypeHoldTON:
+			if r.TonMinBalanceNano < 0 {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "ton_min_balance_nano cannot be negative"})
+			}
 			g.Requirements = append(g.Requirements, dg.Requirement{Type: dg.RequirementTypeHoldTON, TonMinBalanceNano: r.TonMinBalanceNano, Title: r.Name, Description: r.Description})
 		case dg.RequirementTypeHoldJetton:
+			if r.JettonMinAmount < 0 {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "jetton_min_amount cannot be negative"})
+			}
 			g.Requirements = append(g.Requirements, dg.Requirement{Type: dg.RequirementTypeHoldJetton, JettonAddress: r.JettonAddress, JettonMinAmount: r.JettonMinAmount, Title: r.Name, Description: r.Description})
 		}
 	}
 
 	// Map prizes
 	for _, p := range req.Prizes {
+		if p.Quantity < 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "prize quantity cannot be negative"})
+		}
 		qty := p.Quantity
 		if qty <= 0 {
 			qty = 1

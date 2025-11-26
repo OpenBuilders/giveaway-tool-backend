@@ -66,6 +66,11 @@ func (s *Service) Create(ctx context.Context, g *dg.Giveaway) (string, error) {
 	if g.Duration < 0 {
 		return "", errors.New("duration must be >= 0")
 	}
+	// Validate maximum duration (2 months = 60 days = 5184000 seconds)
+	const maxDurationSeconds = 60 * 24 * 60 * 60 // 60 days in seconds
+	if g.Duration > maxDurationSeconds {
+		return "", errors.New("duration cannot exceed 2 months (60 days)")
+	}
 
 	id := uuid.NewString()
 	g.ID = id
