@@ -343,7 +343,15 @@ func (h *GiveawayHandlersFiber) prepareInlineMessage(c *fiber.Ctx) error {
 	// Build the same text as in NotifyStarted
 	text := buildStartMessageForPrepare(g)
 	// Use the same GIF as announcement
-	const startedGIF = "https://cdn.giveaway.tools.tg/assets/Started.gif"
+	// const startedGIF = "https://cdn.giveaway.tools.tg/assets/Started.gif"
+	// get file_id from Redis
+	startedGIF, err := h.rdb.Get(c.Context(), "tg:file_id:animation:started").Result()
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	if startedGIF == "" {
+		startedGIF = "https://cdn.giveaway.tools.tg/assets/Started.gif"
+	}
 	// Use GIF as thumbnail fallback to satisfy Bot API requirements
 	msgID, err := h.telegram.SavePreparedInlineMessageGif(c.Context(), g.CreatorID, startedGIF, startedGIF, text, "Open Giveaway", startURL)
 	if err != nil || msgID == "" {

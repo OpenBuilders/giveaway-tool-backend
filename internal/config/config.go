@@ -21,6 +21,7 @@ type Config struct {
 	CORSAllowedOrigins string
 	// Telegram init-data validation settings
 	TelegramBotToken string // Bot token for first-party validation
+	TelegramAdminID  int64  // Admin ID to receive file uploads
 	InitDataTTL      int    // TTL in seconds for init-data expiration (0 to skip)
 	// Workers
 	GiveawayExpireIntervalSec int // background worker tick seconds
@@ -45,11 +46,16 @@ func Load() (*Config, error) {
 		PublicBaseURL:      getEnv("PUBLIC_BASE_URL", "https://dev-api.giveaway.tools.tg"),
 		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "*"),
 		TelegramBotToken:   getEnv("TELEGRAM_BOT_TOKEN", ""),
-		TonProofDomain:     getEnv("TON_PROOF_DOMAIN", ""),
-		TonAPIBaseURL:      getEnv("TONAPI_BASE_URL", "https://tonapi.io"),
-		TonAPIToken:        getEnv("TONAPI_TOKEN", ""),
-		TonLiteConfigURL:   getEnv("TON_LITE_CONFIG_URL", "https://ton.org/global-config.json"),
-		WebAppBaseURL:      getEnv("WEBAPP_BASE_URL", ""),
+		TelegramAdminID: func() int64 {
+			idStr := getEnv("TELEGRAM_ADMIN_ID", "-1003116720090")
+			id, _ := strconv.ParseInt(idStr, 10, 64)
+			return id
+		}(),
+		TonProofDomain:   getEnv("TON_PROOF_DOMAIN", ""),
+		TonAPIBaseURL:    getEnv("TONAPI_BASE_URL", "https://tonapi.io"),
+		TonAPIToken:      getEnv("TONAPI_TOKEN", ""),
+		TonLiteConfigURL: getEnv("TON_LITE_CONFIG_URL", "https://ton.org/global-config.json"),
+		WebAppBaseURL:    getEnv("WEBAPP_BASE_URL", ""),
 	}
 	redisDBStr := getEnv("REDIS_DB", "0")
 	dbNum, err := strconv.Atoi(redisDBStr)

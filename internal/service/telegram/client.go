@@ -1,13 +1,17 @@
 package telegram
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -703,16 +707,11 @@ func (c *Client) SavePreparedInlineMessageGif(ctx context.Context, userID int64,
 	}
 	// InlineQueryResultGif payload
 	result := map[string]any{
-		"type":    "gif",
+		"type":    "mpeg4_gif",
 		"id":      fmt.Sprintf("g-%d-%d", userID, time.Now().UnixNano()),
-		"gif_url": gifURL,
+		"mpeg4_file_id": gifURL,
 	}
-	// Some API versions require a thumbnail; set both keys for compatibility
-	if thumbnailURL == "" {
-		thumbnailURL = gifURL
-	}
-	result["thumbnail_url"] = thumbnailURL
-	result["thumb_url"] = thumbnailURL
+	
 	if captionHTML != "" {
 		result["caption"] = captionHTML
 		result["parse_mode"] = "HTML"
@@ -777,4 +776,72 @@ func (c *Client) SavePreparedInlineMessageGif(ctx context.Context, userID int64,
 		}
 	}
 	return "", fmt.Errorf("prepared inline message id not found")
+}
+
+// UploadAnimation uploads a local animation file to Telegram via multipart/form-data and returns the file_id.
+func (c *Client) UploadAnimation(ctx context.Context, chatID int64, filePath string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("animation", filepath.Base(filePath))
+	if err != nil {
+		return "", err
+	}
+	if _, err = io.Copy(part, file); err != nil {
+		return "", err
+	}
+	if err = writer.WriteField("chat_id", fmt.Sprintf("%d", chatID)); err != nil {
+		return "", err
+	}
+	if err = writer.Close(); err != nil {
+		return "", err
+	}
+
+	endpoint := fmt.Sprintf("https://api.telegram.org/bot%s/sendAnimation", c.token)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, body)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Ok          bool   `json:"ok"`
+		Description string `json:"description"`
+		Result      struct {
+			Animation struct {
+				FileID string `json:"file_id"`
+			} `json:"animation"`
+			Document struct {
+				FileID string `json:"file_id"`
+			} `json:"document"`
+		} `json:"result"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+
+	if !result.Ok {
+		return "", fmt.Errorf("telegram upload error: %s", result.Description)
+	}
+
+	if result.Result.Animation.FileID != "" {
+		return result.Result.Animation.FileID, nil
+	}
+	if result.Result.Document.FileID != "" {
+		return result.Result.Document.FileID, nil
+	}
+
+	return "", fmt.Errorf("no file_id found in response")
 }
