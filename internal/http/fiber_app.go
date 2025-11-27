@@ -87,9 +87,9 @@ func NewFiberApp(pg *sql.DB, rdb *redisp.Client, cfg *config.Config) *fiber.App 
 		cancel()
 	}
 	notifier := notify.NewService(tgClient, chs, cfg.WebAppBaseURL, rdb, us)
-	gs := gsvc.NewService(gRepo, chs).WithTelegram(tgClient).WithNotifier(notifier).WithRedis(rdb)
 	// TON balance via TonAPI
 	tbs := tonbalance.NewService(cfg.TonAPIBaseURL, cfg.TonAPIToken).WithCache(rdb, 0)
+	gs := gsvc.NewService(gRepo, chs).WithTelegram(tgClient).WithNotifier(notifier).WithRedis(rdb).WithUser(us).WithTonBalance(tbs)
 	gh := NewGiveawayHandlersFiber(gs, chs, tgClient, us, tbs, rdb)
 
 	// API groups

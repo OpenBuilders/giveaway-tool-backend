@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"math/big"
-	"math/rand"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +13,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 
 	dg "github.com/open-builders/giveaway-backend/internal/domain/giveaway"
 	"github.com/open-builders/giveaway-backend/internal/http/middleware"
@@ -25,6 +24,7 @@ import (
 	tgsvc "github.com/open-builders/giveaway-backend/internal/service/telegram"
 	tonb "github.com/open-builders/giveaway-backend/internal/service/tonbalance"
 	usersvc "github.com/open-builders/giveaway-backend/internal/service/user"
+	"github.com/open-builders/giveaway-backend/internal/utils/random"
 	tgutils "github.com/open-builders/giveaway-backend/internal/utils/telegram"
 )
 
@@ -346,7 +346,7 @@ func (h *GiveawayHandlersFiber) prepareInlineMessage(c *fiber.Ctx) error {
 	// const startedGIF = "https://cdn.giveaway.tools.tg/assets/Started.gif"
 	// get file_id from Redis
 	startedGIF, err := h.rdb.Get(c.Context(), "tg:file_id:animation:started").Result()
-	if err != nil {
+	if err != nil && err != redis.Nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	if startedGIF == "" {
@@ -729,15 +729,7 @@ func (h *GiveawayHandlersFiber) requirementsAllMet(c *fiber.Ctx, g *dg.Giveaway)
 	if userID == 0 {
 		return false
 	}
-	allMet := true
-	for _, rqm := range g.Requirements {
-		res := h.checkSingleRequirement(c, userID, &rqm)
-		if res.Error != "" || res.Status != "success" {
-			allMet = false
-			break
-		}
-	}
-	return allMet
+	return h.service.CheckRequirements(c.Context(), userID, g.Requirements)
 }
 
 func (h *GiveawayHandlersFiber) join(c *fiber.Ctx) error {
@@ -860,7 +852,9 @@ func (h *GiveawayHandlersFiber) uploadManualCandidates(c *fiber.Ctx) error {
 	// Enforce max winners limit from giveaway settings
 	if g.MaxWinnersCount > 0 && len(out) > g.MaxWinnersCount {
 		// shuffle to ensure random selection when truncating
-		rand.Shuffle(len(out), func(i, j int) { out[i], out[j] = out[j], out[i] })
+		if err := random.Shuffle(out); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to shuffle candidates"})
+		}
 		out = out[:g.MaxWinnersCount]
 	}
 
@@ -1347,7 +1341,7 @@ func (h *GiveawayHandlersFiber) checkRequirements(c *fiber.Ctx) error {
 			}
 		}
 		// Perform requirement check via shared helper
-		res := h.checkSingleRequirement(c, userID, &rqm)
+		res := h.service.CheckSingleRequirement(c.Context(), userID, &rqm)
 		// Map result
 		it.Status = res.Status
 		it.Error = res.Error
@@ -1376,138 +1370,4 @@ func (h *GiveawayHandlersFiber) checkRequirements(c *fiber.Ctx) error {
 		"results":     results,
 		"all_met":     allMet,
 	})
-}
-
-// checkSingleRequirement verifies one requirement for the given user and returns a minimal result.
-func (h *GiveawayHandlersFiber) checkSingleRequirement(c *fiber.Ctx, userID int64, rqm *dg.Requirement) (res struct {
-	Status string
-	Error  string
-}) {
-	res.Status = "failed"
-	switch rqm.Type {
-	case dg.RequirementTypeSubscription:
-		chat := ""
-		if rqm.ChannelID != 0 {
-			chat = fmt.Sprintf("%d", rqm.ChannelID)
-		} else if rqm.ChannelUsername != "" {
-			chat = "@" + rqm.ChannelUsername
-		}
-		if chat == "" {
-			res.Error = "invalid requirement: no channel"
-			return
-		}
-		ok, e := h.telegram.CheckMembership(c.Context(), userID, chat)
-		if e != nil {
-			res.Error = e.Error()
-			return
-		}
-		if ok {
-			res.Status = "success"
-		}
-		return
-	case dg.RequirementTypeBoost:
-		chat := ""
-		if rqm.ChannelID != 0 {
-			chat = fmt.Sprintf("%d", rqm.ChannelID)
-		} else if rqm.ChannelUsername != "" {
-			chat = "@" + rqm.ChannelUsername
-		}
-		if chat == "" {
-			res.Error = "invalid requirement: no channel"
-			return
-		}
-		// Prefer Redis-based boost check if available
-		if h.rdb != nil && rqm.ChannelID != 0 {
-			key := fmt.Sprintf("channel:%d:boost_users", rqm.ChannelID)
-			uid := fmt.Sprintf("%d", userID)
-			if ok, err := h.rdb.SIsMember(c.Context(), key, uid).Result(); err == nil && ok {
-				res.Status = "success"
-				return
-			}
-		}
-		// Fallback to Telegram API check
-		if h.telegram != nil {
-			ok, e := h.telegram.CheckBoost(c.Context(), userID, chat)
-			if e != nil {
-				res.Error = e.Error()
-				return
-			}
-			if ok {
-				res.Status = "success"
-			}
-		}
-		return
-	case dg.RequirementTypeCustom:
-		res.Status = "success"
-		return
-	case dg.RequirementTypePremium:
-		// Prefer current request init-data; fallback to stored user flag
-		if v := c.Locals(middleware.IsPremiumCtxParam); v != nil {
-			if b, ok := v.(bool); ok && b {
-				res.Status = "success"
-				return
-			}
-		}
-		if h.users != nil {
-			if u, err := h.users.GetByID(c.Context(), userID); err == nil && u != nil && u.IsPremium {
-				res.Status = "success"
-				return
-			}
-		}
-		return
-	case dg.RequirementTypeHoldTON:
-		if h.users == nil || h.ton == nil {
-			res.Error = "ton service not configured"
-			return
-		}
-		u, err := h.users.GetByID(c.Context(), userID)
-		if err != nil || u == nil || u.WalletAddress == "" {
-			res.Error = "wallet not linked"
-			return
-		}
-		bal, err := h.ton.GetAddressBalanceNano(c.Context(), u.WalletAddress)
-		if err != nil {
-			res.Error = err.Error()
-			return
-		}
-		if rqm.TonMinBalanceNano > 0 && bal >= rqm.TonMinBalanceNano {
-			res.Status = "success"
-		}
-		return
-	case dg.RequirementTypeHoldJetton:
-		if h.users == nil || h.ton == nil {
-			res.Error = "ton service not configured"
-			return
-		}
-		u, err := h.users.GetByID(c.Context(), userID)
-		if err != nil || u == nil || u.WalletAddress == "" {
-			res.Error = "wallet not linked"
-			return
-		}
-		if rqm.JettonAddress == "" || rqm.JettonMinAmount <= 0 {
-			res.Error = "invalid jetton requirement"
-			return
-		}
-		bal, err := h.ton.GetJettonBalanceNano(c.Context(), u.WalletAddress, rqm.JettonAddress)
-		if err != nil {
-			res.Error = err.Error()
-			return
-		}
-		dec, derr := h.ton.GetJettonDecimals(c.Context(), rqm.JettonAddress)
-		if derr != nil {
-			res.Error = derr.Error()
-			return
-		}
-		req := new(big.Int).SetInt64(rqm.JettonMinAmount)
-		pow10 := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(dec)), nil)
-		req.Mul(req, pow10)
-		balBI := new(big.Int).SetInt64(bal)
-		if balBI.Cmp(req) >= 0 {
-			res.Status = "success"
-		}
-		return
-	default:
-		res.Error = "unsupported requirement type"
-		return
-	}
 }

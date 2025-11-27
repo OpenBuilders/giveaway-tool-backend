@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/big"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +16,9 @@ import (
 	channelsvc "github.com/open-builders/giveaway-backend/internal/service/channels"
 	notify "github.com/open-builders/giveaway-backend/internal/service/notifications"
 	tg "github.com/open-builders/giveaway-backend/internal/service/telegram"
+	tonb "github.com/open-builders/giveaway-backend/internal/service/tonbalance"
+	usersvc "github.com/open-builders/giveaway-backend/internal/service/user"
+	"github.com/open-builders/giveaway-backend/internal/utils/random"
 	tgutils "github.com/open-builders/giveaway-backend/internal/utils/telegram"
 )
 
@@ -25,6 +29,8 @@ type Service struct {
 	ntf      *notify.Service
 	channels *channelsvc.Service
 	rdb      *redisp.Client
+	users    *usersvc.Service
+	ton      *tonb.Service
 }
 
 func NewService(r *repo.GiveawayRepository, chs *channelsvc.Service) *Service {
@@ -39,6 +45,12 @@ func (s *Service) WithNotifier(n *notify.Service) *Service { s.ntf = n; return s
 
 // WithRedis injects Redis client for requirement checks like boost.
 func (s *Service) WithRedis(rdb *redisp.Client) *Service { s.rdb = rdb; return s }
+
+// WithUser injects user service for user-related checks.
+func (s *Service) WithUser(users *usersvc.Service) *Service { s.users = users; return s }
+
+// WithTonBalance injects TON balance service for on-chain checks.
+func (s *Service) WithTonBalance(ton *tonb.Service) *Service { s.ton = ton; return s }
 
 // Create validates and persists a new giveaway.
 func (s *Service) Create(ctx context.Context, g *dg.Giveaway) (string, error) {
@@ -358,11 +370,38 @@ func (s *Service) FinishOneWithDistribution(ctx context.Context, id string) erro
 			return nil
 		}
 	}
+
+	participants, err := s.repo.GetParticipants(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	// Shuffle participants securely
+	if err := random.Shuffle(participants); err != nil {
+		return err
+	}
+
 	winnersCount := g.MaxWinnersCount
 	if winnersCount <= 0 {
 		winnersCount = 1
 	}
-	if err := s.repo.FinishOneWithDistribution(ctx, id, winnersCount); err != nil {
+
+	winners := make([]int64, 0, winnersCount)
+
+	for _, uid := range participants {
+		if s.CheckRequirements(ctx, uid, g.Requirements) {
+			winners = append(winners, uid)
+			if len(winners) >= winnersCount {
+				break
+			}
+		}
+		// Avoid rate limits by adding a small delay between checks
+		if len(g.Requirements) > 0 {
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+
+	if err := s.repo.FinishWithWinners(ctx, id, winners); err != nil {
 		return err
 	}
 	// Best-effort DM notification to winners only
@@ -432,68 +471,15 @@ func (s *Service) FinalizePendingWithCandidates(ctx context.Context, id string, 
 	}
 	accepted := len(filtered)
 
-	// Filter by non-custom requirements (subscription/boost); TG errors tolerated
+	// Filter by non-custom requirements; now iterating all available requirements using centralized check
 	winners := make([]int64, 0, g.MaxWinnersCount)
 	for _, uid := range filtered {
-		satisfies := true
-		if s.tg != nil {
-			for _, req := range g.Requirements {
-				switch req.Type {
-				case dg.RequirementTypeSubscription:
-					chat := ""
-					if req.ChannelID != 0 {
-						chat = fmt.Sprintf("%d", req.ChannelID)
-					} else if req.ChannelUsername != "" {
-						chat = "@" + req.ChannelUsername
-					}
-					if chat == "" {
-						continue
-					}
-					ok, err := s.tg.CheckMembership(ctx, uid, chat)
-					if err != nil {
-						continue
-					}
-					if !ok {
-						satisfies = false
-					}
-				case dg.RequirementTypeBoost:
-					chat := ""
-					if req.ChannelID != 0 {
-						chat = fmt.Sprintf("%d", req.ChannelID)
-					} else if req.ChannelUsername != "" {
-						chat = "@" + req.ChannelUsername
-					}
-					if chat == "" {
-						continue
-					}
-					// Prefer Redis-based check
-					if s.rdb != nil && req.ChannelID != 0 {
-						key := fmt.Sprintf("channel:%d:boost_users", req.ChannelID)
-						if ok, err := s.rdb.SIsMember(ctx, key, fmt.Sprintf("%d", uid)).Result(); err == nil {
-							if !ok {
-								satisfies = false
-							}
-							break
-						}
-					}
-					// Fallback to Telegram API
-					if s.tg != nil {
-						ok, err := s.tg.CheckBoost(ctx, uid, chat)
-						if err != nil {
-							continue
-						}
-						if !ok {
-							satisfies = false
-						}
-					}
-				}
-				if !satisfies {
-					break
-				}
-			}
-		}
-		if satisfies {
+		if s.CheckRequirements(ctx, uid, g.Requirements) {
 			winners = append(winners, uid)
+		}
+		// Avoid rate limits
+		if len(g.Requirements) > 0 {
+			time.Sleep(50 * time.Millisecond)
 		}
 	}
 
@@ -696,4 +682,153 @@ func (s *Service) ClearManualWinners(ctx context.Context, id string, requesterID
 		return errors.New("not pending")
 	}
 	return s.repo.ClearWinners(ctx, id)
+}
+
+// CheckRequirements verifies if a user meets all giveaway requirements.
+// It now iterates through all requirements using CheckSingleRequirement.
+func (s *Service) CheckRequirements(ctx context.Context, uid int64, reqs []dg.Requirement) bool {
+	for _, req := range reqs {
+		res := s.CheckSingleRequirement(ctx, uid, &req)
+		if res.Status != "success" {
+			return false
+		}
+	}
+	return true
+}
+
+// CheckRequirementResult is the result of checking a single requirement.
+type CheckRequirementResult struct {
+	Status string
+	Error  string
+}
+
+// CheckSingleRequirement verifies one requirement for the given user.
+func (s *Service) CheckSingleRequirement(ctx context.Context, userID int64, rqm *dg.Requirement) CheckRequirementResult {
+	res := CheckRequirementResult{Status: "failed"}
+	switch rqm.Type {
+	case dg.RequirementTypeSubscription:
+		chat := ""
+		if rqm.ChannelID != 0 {
+			chat = fmt.Sprintf("%d", rqm.ChannelID)
+		} else if rqm.ChannelUsername != "" {
+			chat = "@" + rqm.ChannelUsername
+		}
+		if chat == "" {
+			res.Error = "invalid requirement: no channel"
+			return res
+		}
+		if s.tg == nil {
+			// If telegram client is missing, we cannot verify, assuming success to avoid blocking (or fail?)
+			// Assuming fail if strict, but preserving old behavior might be safer.
+			// However, handler logic implies check must pass.
+			res.Error = "telegram service not configured"
+			return res
+		}
+		ok, e := s.tg.CheckMembership(ctx, userID, chat)
+		if e != nil {
+			res.Error = e.Error()
+			return res
+		}
+		if ok {
+			res.Status = "success"
+		}
+		return res
+	case dg.RequirementTypeBoost:
+		chat := ""
+		if rqm.ChannelID != 0 {
+			chat = fmt.Sprintf("%d", rqm.ChannelID)
+		} else if rqm.ChannelUsername != "" {
+			chat = "@" + rqm.ChannelUsername
+		}
+		if chat == "" {
+			res.Error = "invalid requirement: no channel"
+			return res
+		}
+		// Prefer Redis-based boost check if available
+		if s.rdb != nil && rqm.ChannelID != 0 {
+			key := fmt.Sprintf("channel:%d:boost_users", rqm.ChannelID)
+			uid := fmt.Sprintf("%d", userID)
+			if ok, err := s.rdb.SIsMember(ctx, key, uid).Result(); err == nil && ok {
+				res.Status = "success"
+				return res
+			}
+		}
+		// Fallback to Telegram API check
+		if s.tg != nil {
+			ok, e := s.tg.CheckBoost(ctx, userID, chat)
+			if e != nil {
+				res.Error = e.Error()
+				return res
+			}
+			if ok {
+				res.Status = "success"
+			}
+		}
+		return res
+	case dg.RequirementTypeCustom:
+		res.Status = "success"
+		return res
+	case dg.RequirementTypePremium:
+		if s.users != nil {
+			if u, err := s.users.GetByID(ctx, userID); err == nil && u != nil && u.IsPremium {
+				res.Status = "success"
+				return res
+			}
+		}
+		return res
+	case dg.RequirementTypeHoldTON:
+		if s.users == nil || s.ton == nil {
+			res.Error = "ton service not configured"
+			return res
+		}
+		u, err := s.users.GetByID(ctx, userID)
+		if err != nil || u == nil || u.WalletAddress == "" {
+			res.Error = "wallet not linked"
+			return res
+		}
+		bal, err := s.ton.GetAddressBalanceNano(ctx, u.WalletAddress)
+		if err != nil {
+			res.Error = err.Error()
+			return res
+		}
+		if rqm.TonMinBalanceNano > 0 && bal >= rqm.TonMinBalanceNano {
+			res.Status = "success"
+		}
+		return res
+	case dg.RequirementTypeHoldJetton:
+		if s.users == nil || s.ton == nil {
+			res.Error = "ton service not configured"
+			return res
+		}
+		u, err := s.users.GetByID(ctx, userID)
+		if err != nil || u == nil || u.WalletAddress == "" {
+			res.Error = "wallet not linked"
+			return res
+		}
+		if rqm.JettonAddress == "" || rqm.JettonMinAmount <= 0 {
+			res.Error = "invalid jetton requirement"
+			return res
+		}
+		bal, err := s.ton.GetJettonBalanceNano(ctx, u.WalletAddress, rqm.JettonAddress)
+		if err != nil {
+			res.Error = err.Error()
+			return res
+		}
+		dec, derr := s.ton.GetJettonDecimals(ctx, rqm.JettonAddress)
+		if derr != nil {
+			res.Error = derr.Error()
+			return res
+		}
+		req := new(big.Int).SetInt64(rqm.JettonMinAmount)
+		pow10 := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(dec)), nil)
+		req.Mul(req, pow10)
+		balBI := new(big.Int).SetInt64(bal)
+		if balBI.Cmp(req) >= 0 {
+			res.Status = "success"
+		}
+		return res
+	default:
+		res.Error = "unsupported requirement type"
+		return res
+	}
 }

@@ -70,7 +70,7 @@ func main() {
 	expSvc := gsvc.NewService(expRepo, chs)
 	// Attach Telegram + notifications so worker can emit completion messages
 	tgClient := tg.NewClientFromEnv()
-	
+
 	// Upload animations if needed (requires TELEGRAM_ADMIN_ID)
 	if cfg.TelegramAdminID != 0 {
 		uploadAnimation := func(key, filePath string) {
@@ -108,7 +108,7 @@ func main() {
 	ucache := rcache.NewUserCache(rdb, 5*time.Second)
 	usvc := usersvc.NewService(urepo, ucache)
 	notifier := notify.NewService(tgClient, chs, cfg.WebAppBaseURL, rdb, usvc)
-	expSvc = expSvc.WithTelegram(tgClient).WithNotifier(notifier)
+	expSvc = expSvc.WithTelegram(tgClient).WithNotifier(notifier).WithUser(usvc)
 	go func() {
 		ticker := time.NewTicker(time.Duration(cfg.GiveawayExpireIntervalSec) * time.Second)
 		defer ticker.Stop()
