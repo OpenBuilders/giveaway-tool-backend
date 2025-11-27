@@ -350,7 +350,7 @@ func (h *GiveawayHandlersFiber) prepareInlineMessage(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 	if startedGIF == "" {
-		startedGIF = "https://cdn.giveaway.tools.tg/assets/Started.gif"
+		startedGIF = "https://cdn.giveaway.tools.tg/assets/Giveaway.mp4"
 	}
 	// Use GIF as thumbnail fallback to satisfy Bot API requirements
 	msgID, err := h.telegram.SavePreparedInlineMessageGif(c.Context(), g.CreatorID, startedGIF, startedGIF, text, "Open Giveaway", startURL)
