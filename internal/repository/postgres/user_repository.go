@@ -50,7 +50,7 @@ func (r *UserRepository) Upsert(ctx context.Context, u *domain.User) error {
 
 // GetByID returns a user by Telegram ID.
 func (r *UserRepository) GetByID(ctx context.Context, id int64) (*domain.User, error) {
-	const q = `SELECT id, username, first_name, last_name, COALESCE(avatar_url, ''), is_premium, role, status, COALESCE(wallet_address, ''), created_at, updated_at FROM users WHERE id=$1`
+	const q = `SELECT id, COALESCE(username, ''), first_name, last_name, COALESCE(avatar_url, ''), is_premium, role, status, COALESCE(wallet_address, ''), created_at, updated_at FROM users WHERE id=$1`
 	row := r.db.QueryRowContext(ctx, q, id)
 	var u domain.User
 	if err := row.Scan(&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.AvatarURL, &u.IsPremium, &u.Role, &u.Status, &u.WalletAddress, &u.CreatedAt, &u.UpdatedAt); err != nil {
@@ -65,7 +65,7 @@ func (r *UserRepository) GetByID(ctx context.Context, id int64) (*domain.User, e
 // GetByUsername returns a user by username (case-insensitive). Returns nil if not found.
 func (r *UserRepository) GetByUsername(ctx context.Context, username string) (*domain.User, error) {
 	const q = `
-SELECT id, username, first_name, last_name, COALESCE(avatar_url, ''), is_premium, role, status, COALESCE(wallet_address, ''), created_at, updated_at
+SELECT id, COALESCE(username, ''), first_name, last_name, COALESCE(avatar_url, ''), is_premium, role, status, COALESCE(wallet_address, ''), created_at, updated_at
 FROM users
 WHERE lower(username) = lower($1)
 `
@@ -80,10 +80,11 @@ WHERE lower(username) = lower($1)
 	return &u, nil
 }
 
+
 // GetByWalletAddress returns a user by wallet address (case-insensitive). Returns nil if not found.
 func (r *UserRepository) GetByWalletAddress(ctx context.Context, wallet string) (*domain.User, error) {
 	const q = `
-SELECT id, username, first_name, last_name, COALESCE(avatar_url, ''), is_premium, role, status, COALESCE(wallet_address, ''), created_at, updated_at
+SELECT id, COALESCE(username, ''), first_name, last_name, COALESCE(avatar_url, ''), is_premium, role, status, COALESCE(wallet_address, ''), created_at, updated_at
 FROM users
 WHERE lower(wallet_address) = lower($1)
 `
@@ -98,6 +99,7 @@ WHERE lower(wallet_address) = lower($1)
 	return &u, nil
 }
 
+
 // List returns users with pagination ordered by created_at desc.
 func (r *UserRepository) List(ctx context.Context, limit, offset int) ([]domain.User, error) {
 	if limit <= 0 || limit > 1000 {
@@ -107,7 +109,7 @@ func (r *UserRepository) List(ctx context.Context, limit, offset int) ([]domain.
 		offset = 0
 	}
 	const q = `
-SELECT id, username, first_name, last_name, COALESCE(avatar_url, ''), is_premium, role, status, COALESCE(wallet_address, ''), created_at, updated_at
+SELECT id, COALESCE(username, ''), first_name, last_name, COALESCE(avatar_url, ''), is_premium, role, status, COALESCE(wallet_address, ''), created_at, updated_at
 FROM users
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2`
@@ -127,6 +129,7 @@ LIMIT $1 OFFSET $2`
 	}
 	return users, rows.Err()
 }
+
 
 // Delete removes a user by ID.
 func (r *UserRepository) Delete(ctx context.Context, id int64) error {

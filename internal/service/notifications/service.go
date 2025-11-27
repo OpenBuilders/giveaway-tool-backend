@@ -200,6 +200,7 @@ func (s *Service) NotifyCreatorCompleted(ctx context.Context, g *dg.Giveaway) {
 	}
 	msg := fmt.Sprintf("✅ Your giveaway \"%s\" has been completed.\n\nWinners have been selected and notified.", g.Title)
 	btnURL := s.buildWebAppURL(g.ID)
+	
 	_ = s.tg.SendMessage(ctx, g.CreatorID, msg, "HTML", "View Giveaway", btnURL, true)
 }
 

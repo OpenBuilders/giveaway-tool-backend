@@ -3,9 +3,9 @@ package postgres
 import (
 	"context"
 	"database/sql"
-	"math/rand"
 
 	dg "github.com/open-builders/giveaway-backend/internal/domain/giveaway"
+	"github.com/open-builders/giveaway-backend/internal/utils/random"
 )
 
 // GiveawayRepository persists giveaways and their nested entities.
@@ -436,7 +436,9 @@ func (r *GiveawayRepository) FinishOneWithDistribution(ctx context.Context, id s
 		participants = append(participants, uid)
 	}
 	rows.Close()
-	rand.Shuffle(len(participants), func(i, j int) { participants[i], participants[j] = participants[j], participants[i] })
+	if err := random.Shuffle(participants); err != nil {
+		return err
+	}
 
 	// Prepare winners slice size winnersCount or participants length
 	if winnersCount > len(participants) {
@@ -594,6 +596,11 @@ func (r *GiveawayRepository) FinishWithWinners(ctx context.Context, id string, w
 
 	winnersCount := len(winners)
 	if winnersCount == 0 {
+		// no winners, set status to completed
+		if _, err = tx.ExecContext(ctx, `UPDATE giveaways SET status='completed', updated_at=now() WHERE id=$1`, id); err != nil {
+			return err
+		}
+
 		return tx.Commit()
 	}
 
@@ -968,6 +975,25 @@ func (r *GiveawayRepository) ListActive(ctx context.Context, limit, offset, minP
 		out = append(out, g)
 	}
 	return out, rows.Err()
+}
+
+// GetParticipants returns all participant user IDs for a giveaway.
+func (r *GiveawayRepository) GetParticipants(ctx context.Context, id string) ([]int64, error) {
+	const q = `SELECT user_id FROM giveaway_participants WHERE giveaway_id=$1`
+	rows, err := r.db.QueryContext(ctx, q, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var participants []int64
+	for rows.Next() {
+		var uid int64
+		if err := rows.Scan(&uid); err != nil {
+			return nil, err
+		}
+		participants = append(participants, uid)
+	}
+	return participants, rows.Err()
 }
 
 // RemoveRequirementsByChannelID removes any requirements that depend on the given channel ID.
