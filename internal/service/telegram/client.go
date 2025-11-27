@@ -707,11 +707,28 @@ func (c *Client) SavePreparedInlineMessageGif(ctx context.Context, userID int64,
 	}
 	// InlineQueryResultGif payload
 	result := map[string]any{
-		"type":    "mpeg4_gif",
-		"id":      fmt.Sprintf("g-%d-%d", userID, time.Now().UnixNano()),
-		"mpeg4_file_id": gifURL,
+		"type": "mpeg4_gif",
+		"id":   fmt.Sprintf("g-%d-%d", userID, time.Now().UnixNano()),
 	}
-	
+
+	// If gifURL looks like a file_id, use mpeg4_file_id, otherwise use mpeg4_url
+	if strings.HasPrefix(gifURL, "http") {
+		result["mpeg4_url"] = gifURL
+		// For MPEG4_GIF via URL, thumb_url/thumbnail_url is technically optional if not required by clients,
+		// but sometimes required if Telegram can't generate it.
+		// We can reuse the same URL as thumb for MP4 if it's small enough, or omit.
+		// For reliability, if we have a separate thumb, use it.
+		if thumbnailURL != "" {
+			result["thumbnail_url"] = thumbnailURL
+		} else {
+			// Use the same URL as thumbnail if it's a URL, hoping it works or is not strictly required for mpeg4_gif
+			result["thumbnail_url"] = gifURL
+		}
+	} else {
+		// It's a file_id
+		result["mpeg4_file_id"] = gifURL
+	}
+
 	if captionHTML != "" {
 		result["caption"] = captionHTML
 		result["parse_mode"] = "HTML"
