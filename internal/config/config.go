@@ -34,6 +34,7 @@ type Config struct {
 	TonLiteConfigURL string // optional global config URL (defaults to https://ton.org/global-config.json)
 	// WebApp
 	WebAppBaseURL string // base URL for webapp, used in notifications buttons
+	CDNURL        string // Base URL for CDN assets
 }
 
 // Load reads environment variables into Config with sane defaults for local dev.
@@ -44,6 +45,7 @@ func Load() (*Config, error) {
 		RedisAddr:          getEnv("REDIS_ADDR", "localhost:6379"),
 		RedisPassword:      getEnv("REDIS_PASSWORD", ""),
 		PublicBaseURL:      getEnv("PUBLIC_BASE_URL", "https://dev-api.giveaway.tools.tg"),
+		CDNURL:             getEnv("CDN_URL", "https://tg-tools.fra1.cdn.digitaloceanspaces.com"),
 		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "*"),
 		TelegramBotToken:   getEnv("TELEGRAM_BOT_TOKEN", ""),
 		TelegramAdminID: func() int64 {

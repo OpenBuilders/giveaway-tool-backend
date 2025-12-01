@@ -13,7 +13,6 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
-	"github.com/redis/go-redis/v9"
 
 	dg "github.com/open-builders/giveaway-backend/internal/domain/giveaway"
 	"github.com/open-builders/giveaway-backend/internal/http/middleware"
@@ -344,14 +343,9 @@ func (h *GiveawayHandlersFiber) prepareInlineMessage(c *fiber.Ctx) error {
 	text := buildStartMessageForPrepare(g)
 	// Use the same GIF as announcement
 	// const startedGIF = "https://cdn.giveaway.tools.tg/assets/Started.gif"
-	// get file_id from Redis
-	startedGIF, err := h.rdb.Get(c.Context(), "tg:file_id:animation:started").Result()
-	if err != nil && err != redis.Nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
-	}
-	if startedGIF == "" {
-		startedGIF = "https://cdn.giveaway.tools.tg/assets/Giveaway.mp4"
-	}
+	// get file_id from config via client
+	startedGIF := h.telegram.Media["giveaway_started"]
+
 	// Use GIF as thumbnail fallback to satisfy Bot API requirements
 	msgID, err := h.telegram.SavePreparedInlineMessageGif(c.Context(), g.CreatorID, startedGIF, startedGIF, text, "Open Giveaway", startURL)
 	if err != nil || msgID == "" {
