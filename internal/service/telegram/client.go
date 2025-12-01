@@ -26,13 +26,24 @@ type Client struct {
 	token      string
 	logger     *log.Logger
 	botID      int64
+	Media      map[string]string
 }
 
 func NewClientFromEnv() *Client {
+	cdnURL := os.Getenv("CDN_URL")
+	if cdnURL == "" {
+		cdnURL = "https://tg-tools.fra1.cdn.digitaloceanspaces.com"
+	}
+	cdnURL = strings.TrimRight(cdnURL, "/")
+
 	return &Client{
 		httpClient: &http.Client{Timeout: 10 * time.Second},
 		token:      os.Getenv("TELEGRAM_BOT_TOKEN"),
 		logger:     log.New(os.Stdout, "[TelegramClient] ", log.LstdFlags),
+		Media: map[string]string{
+			"giveaway_started":  fmt.Sprintf("%s/Giveaway.mp4", cdnURL),
+			"giveaway_finished": fmt.Sprintf("%s/Giveaway.mp4", cdnURL),
+		},
 	}
 }
 

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -23,7 +22,6 @@ import (
 	"github.com/open-builders/giveaway-backend/internal/workers"
 	migfs "github.com/open-builders/giveaway-backend/migrations"
 	"github.com/pressly/goose/v3"
-	"github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -70,38 +68,6 @@ func main() {
 	expSvc := gsvc.NewService(expRepo, chs)
 	// Attach Telegram + notifications so worker can emit completion messages
 	tgClient := tg.NewClientFromEnv()
-
-	// Upload animations if needed (requires TELEGRAM_ADMIN_ID)
-	if cfg.TelegramAdminID != 0 {
-		uploadAnimation := func(key, filePath string) {
-			_, err := rdb.Get(ctx, key).Result()
-			if err == redis.Nil {
-				// Key missing, upload
-				if _, err := os.Stat(filePath); err == nil {
-					log.Printf("Uploading animation %s to Telegram...", filePath)
-					fileID, err := tgClient.UploadAnimation(ctx, cfg.TelegramAdminID, filePath)
-					if err != nil {
-						log.Printf("Failed to upload animation %s: %v", filePath, err)
-					} else {
-						if err := rdb.Set(ctx, key, fileID, 0).Err(); err != nil {
-							log.Printf("Failed to save file_id for %s: %v", key, err)
-						} else {
-							log.Printf("Uploaded animation %s, file_id: %s", filePath, fileID)
-						}
-					}
-				} else {
-					// Only log if we expected it to be there; since we might not have both files yet
-					// we can log a warning or info.
-					log.Printf("Animation file not found: %s (skipping upload for %s)", filePath, key)
-				}
-			}
-		}
-
-		uploadAnimation("tg:file_id:animation:started", "assets/static/Giveaway.mp4")
-		uploadAnimation("tg:file_id:animation:finished", "assets/static/Giveaway.mp4")
-	} else {
-		log.Println("TELEGRAM_ADMIN_ID not set, skipping animation uploads")
-	}
 
 	// user service for username/first name in notifications
 	urepo := pgrepo.NewUserRepository(pg)
