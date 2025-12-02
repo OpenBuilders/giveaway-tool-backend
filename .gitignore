@@ -6,12 +6,45 @@
 *.out
 *.test
 
+# Go specific
+*.so
+*.dylib
+vendor/
+coverage.txt
+coverage.html
+
 # IDE
 .idea/
 .vscode/
+*.swp
+*.swo
+*~
 
 # Env
 .env
+.env.local
+.env.*.local
 
 # OS
 .DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Test coverage
+*.coverprofile

@@ -59,8 +59,8 @@ func (s *Service) NotifyCompleted(ctx context.Context, g *dg.Giveaway, winnersSe
 	}
 	text := buildCompletedMessage(g, winnersSelected)
 	animationID := s.tg.Media["giveaway_finished"]
-	
-	btnURL := s.buildWebAppURL(g.ID)
+
+	btnURL := s.buildStartAppURL(g.ID)
 	// Send to sponsor channels
 	for _, ch := range g.Sponsors {
 		if ch.ID == 0 {
@@ -191,8 +191,8 @@ func (s *Service) NotifyCreatorCompleted(ctx context.Context, g *dg.Giveaway) {
 		return
 	}
 	msg := fmt.Sprintf("✅ Your giveaway \"%s\" has been completed.\n\nWinners have been selected and notified.", g.Title)
-	btnURL := s.buildWebAppURL(g.ID)
-	
+	btnURL := s.buildStartAppURL(g.ID)
+
 	_ = s.tg.SendMessage(ctx, g.CreatorID, msg, "HTML", "View Giveaway", btnURL, true)
 }
 
@@ -202,7 +202,7 @@ func (s *Service) NotifyCreatorPending(ctx context.Context, g *dg.Giveaway) {
 		return
 	}
 	msg := fmt.Sprintf("⏳ Your giveaway \"%s\" has ended and is now pending.\n\nAction required: Please review participants, verify custom requirements, and finalize the giveaway to distribute prizes.", g.Title)
-	btnURL := s.buildWebAppURL(g.ID)
+	btnURL := s.buildStartAppURL(g.ID)
 	_ = s.tg.SendMessage(ctx, g.CreatorID, msg, "HTML", "Open Giveaway", btnURL, true)
 }
 
