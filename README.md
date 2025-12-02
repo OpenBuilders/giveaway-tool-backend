@@ -4,8 +4,6 @@
 
 Giveaway Tool is a comprehensive backend service for managing and conducting giveaways within Telegram communities. It provides robust infrastructure for creating, managing, and executing fair and transparent giveaways with blockchain integration and advanced requirement verification.
 
-* Giveaway bot: [@giveaway_app_bot](https://t.me/giveaway_app_bot)
-
 ### Key Features
 
 * **Giveaway Management**: Create and manage giveaways with multiple prizes and custom requirements
@@ -316,11 +314,8 @@ This project is licensed under the MIT License — see the LICENSE file for deta
 For issues, questions, or contributions, please:
 * Open an issue on GitHub
 * Submit a pull request
-* Try the bot: [@giveaway_app_bot](https://t.me/giveaway_app_bot)
 * Contact the maintainers
 
 ---
-
-**🤖 Bot**: [@giveaway_app_bot](https://t.me/giveaway_app_bot)
 
 Built by [Open Builders](https://github.com/OpenBuilders) | Part of the [Tools.tg](https://tools.tg) ecosystem
