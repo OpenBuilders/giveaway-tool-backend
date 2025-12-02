@@ -827,6 +827,19 @@ func (s *Service) CheckSingleRequirement(ctx context.Context, userID int64, rqm 
 			res.Status = "success"
 		}
 		return res
+	case dg.RequirementTypeAccountAge:
+		// Estimate year from ID
+		year := tgutils.EstimateAccountYear(userID)
+		if year == 0 {
+			res.Error = "could not estimate account age"
+			return res
+		}
+		if rqm.AccountAgeMaxYear > 0 && year > rqm.AccountAgeMaxYear {
+			res.Error = fmt.Sprintf("account too new: registered ~%d, required <= %d", year, rqm.AccountAgeMaxYear)
+			return res
+		}
+		res.Status = "success"
+		return res
 	default:
 		res.Error = "unsupported requirement type"
 		return res

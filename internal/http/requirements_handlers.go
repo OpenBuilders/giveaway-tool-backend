@@ -40,6 +40,7 @@ func (h *RequirementsHandlers) listTemplates(c *fiber.Ctx) error {
 		{"type": "premium", "name": "Be Telegram Premium", "description": "User must have Telegram Premium"},
 		{"type": "holdton", "name": "Hold TON", "description": "User must hold minimum TON balance"},
 		{"type": "holdjetton", "name": "Hold Jetton", "description": "User must hold minimum amount of specified jetton"},
+		{"type": "account_age", "name": "Account Age", "description": "User must have registered on Telegram before a certain year"},
 		{"type": "custom", "name": "Custom", "description": "User must fulfill custom requirement"},
 	})
 }
