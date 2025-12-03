@@ -105,6 +105,9 @@ type createRequirementReq struct {
 	TonMinBalanceNano int64  `json:"ton_min_balance_nano,omitempty"`
 	JettonAddress     string `json:"jetton_address,omitempty"`
 	JettonMinAmount   int64  `json:"jetton_min_amount,omitempty"`
+	// Account age
+	AccountAgeMinYear int `json:"account_age_min_year,omitempty"`
+	AccountAgeMaxYear int `json:"account_age_max_year,omitempty"`
 }
 
 // create handles creation of a new giveaway.
@@ -233,6 +236,22 @@ func (h *GiveawayHandlersFiber) create(c *fiber.Ctx) error {
 				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "jetton_min_amount cannot be negative"})
 			}
 			g.Requirements = append(g.Requirements, dg.Requirement{Type: dg.RequirementTypeHoldJetton, JettonAddress: r.JettonAddress, JettonMinAmount: r.JettonMinAmount, Title: r.Name, Description: r.Description})
+		case dg.RequirementTypeAccountAge:
+			// At least one of min or max year must be specified
+			if r.AccountAgeMinYear <= 0 && r.AccountAgeMaxYear <= 0 {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "at least one of account_age_min_year or account_age_max_year must be specified"})
+			}
+			// Validate that min <= max if both are specified
+			if r.AccountAgeMinYear > 0 && r.AccountAgeMaxYear > 0 && r.AccountAgeMinYear > r.AccountAgeMaxYear {
+				return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "account_age_min_year cannot be greater than account_age_max_year"})
+			}
+			g.Requirements = append(g.Requirements, dg.Requirement{
+				Type:              dg.RequirementTypeAccountAge,
+				AccountAgeMinYear: r.AccountAgeMinYear,
+				AccountAgeMaxYear: r.AccountAgeMaxYear,
+				Title:             r.Name,
+				Description:       r.Description,
+			})
 		}
 	}
 
@@ -481,6 +500,14 @@ func buildRequirementsBlockForPrepare(g *dg.Giveaway) string {
 			}
 		case dg.RequirementTypePremium:
 			b.WriteString("• Telegram Premium user\n")
+		case dg.RequirementTypeAccountAge:
+			if r.AccountAgeMinYear > 0 && r.AccountAgeMaxYear > 0 {
+				b.WriteString(fmt.Sprintf("• Account registered between %d and %d\n", r.AccountAgeMaxYear, r.AccountAgeMinYear))
+			} else if r.AccountAgeMinYear > 0 {
+				b.WriteString(fmt.Sprintf("• Account registered in %d or earlier\n", r.AccountAgeMinYear))
+			} else if r.AccountAgeMaxYear > 0 {
+				b.WriteString(fmt.Sprintf("• Account registered in %d or later\n", r.AccountAgeMaxYear))
+			}
 		}
 	}
 	return b.String()

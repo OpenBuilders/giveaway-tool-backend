@@ -32,7 +32,9 @@ type Requirement struct {
 	// For holdjetton: jetton master address and required minimum amount in smallest units
 	JettonAddress   string `json:"jetton_address,omitempty"`
 	JettonMinAmount int64  `json:"jetton_min_amount,omitempty"`
-	// For account_age: maximum allowed registration year (inclusive)
-	// E.g. if 2020, then 2020, 2019, 2018... are allowed.
+	// For account_age: minimum and maximum allowed registration year (inclusive)
+	// E.g. if AccountAgeMinYear=2018 and AccountAgeMaxYear=2020, then accounts from 2018, 2019, 2020 are allowed.
+	// At least one of these fields must be set when type is account_age.
+	AccountAgeMinYear int `json:"account_age_min_year,omitempty"`
 	AccountAgeMaxYear int `json:"account_age_max_year,omitempty"`
 }

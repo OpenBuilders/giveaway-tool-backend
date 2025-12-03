@@ -322,6 +322,19 @@ func (s *Service) Join(ctx context.Context, id string, userID int64) error {
 						return errors.New("requirements not satisfied")
 					}
 				}
+			case dg.RequirementTypeAccountAge:
+				year := tgutils.EstimateAccountYear(userID)
+				if year == 0 {
+					continue // Cannot estimate, skip check
+				}
+				// Check minimum year (account must be registered in this year or later = not too old)
+				if req.AccountAgeMinYear > 0 && year < req.AccountAgeMinYear {
+					return errors.New("requirements not satisfied")
+				}
+				// Check maximum year (account must be registered in this year or earlier = not too new)
+				if req.AccountAgeMaxYear > 0 && year > req.AccountAgeMaxYear {
+					return errors.New("requirements not satisfied")
+				}
 			}
 		}
 	}
@@ -834,6 +847,12 @@ func (s *Service) CheckSingleRequirement(ctx context.Context, userID int64, rqm 
 			res.Error = "could not estimate account age"
 			return res
 		}
+		// Check minimum year (account cannot be older than this)
+		if rqm.AccountAgeMinYear > 0 && year < rqm.AccountAgeMinYear {
+			res.Error = fmt.Sprintf("account too old: registered ~%d, required >= %d", year, rqm.AccountAgeMinYear)
+			return res
+		}
+		// Check maximum year (account cannot be newer than this)
 		if rqm.AccountAgeMaxYear > 0 && year > rqm.AccountAgeMaxYear {
 			res.Error = fmt.Sprintf("account too new: registered ~%d, required <= %d", year, rqm.AccountAgeMaxYear)
 			return res

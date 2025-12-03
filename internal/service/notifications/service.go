@@ -354,6 +354,14 @@ func buildRequirementsBlock(g *dg.Giveaway) string {
 				}
 				b.WriteString("\n")
 			}
+		case dg.RequirementTypeAccountAge:
+			if r.AccountAgeMinYear > 0 && r.AccountAgeMaxYear > 0 {
+				b.WriteString(fmt.Sprintf("• Account registered between %d and %d\n", r.AccountAgeMaxYear, r.AccountAgeMinYear))
+			} else if r.AccountAgeMinYear > 0 {
+				b.WriteString(fmt.Sprintf("• Account registered in %d or earlier\n", r.AccountAgeMinYear))
+			} else if r.AccountAgeMaxYear > 0 {
+				b.WriteString(fmt.Sprintf("• Account registered in %d or later\n", r.AccountAgeMaxYear))
+			}
 		}
 	}
 	return b.String()
