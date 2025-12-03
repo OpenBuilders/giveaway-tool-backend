@@ -69,8 +69,8 @@ func (r *GiveawayRepository) Create(ctx context.Context, g *dg.Giveaway) error {
 
 	// Requirements
 	if len(g.Requirements) > 0 {
-		const qReq = `INSERT INTO giveaway_requirements (giveaway_id, type, channel_id, channel_username, name, description, ton_min_balance_nano, jetton_address, jetton_min_amount)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`
+		const qReq = `INSERT INTO giveaway_requirements (giveaway_id, type, channel_id, channel_username, name, description, ton_min_balance_nano, jetton_address, jetton_min_amount, account_age_max_year)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`
 		for _, rqm := range g.Requirements {
 			var cid interface{}
 
@@ -91,7 +91,13 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`
 			} else {
 				jetMin = nil
 			}
-			if _, err = tx.ExecContext(ctx, qReq, g.ID, string(rqm.Type), cid, rqm.ChannelUsername, rqm.ChannelTitle, rqm.Description, tonMin, rqm.JettonAddress, jetMin); err != nil {
+			var ageMax interface{}
+			if rqm.AccountAgeMaxYear != 0 {
+				ageMax = rqm.AccountAgeMaxYear
+			} else {
+				ageMax = nil
+			}
+			if _, err = tx.ExecContext(ctx, qReq, g.ID, string(rqm.Type), cid, rqm.ChannelUsername, rqm.ChannelTitle, rqm.Description, tonMin, rqm.JettonAddress, jetMin, ageMax); err != nil {
 				return err
 			}
 		}
@@ -210,7 +216,7 @@ func (r *GiveawayRepository) GetByID(ctx context.Context, id string) (*dg.Giveaw
 	}
 
 	// Load requirements (support older schema without name/description)
-	rqrows, err := r.db.QueryContext(ctx, `SELECT type, channel_id, channel_username, name, description, ton_min_balance_nano, jetton_address, jetton_min_amount FROM giveaway_requirements WHERE giveaway_id=$1`, id)
+	rqrows, err := r.db.QueryContext(ctx, `SELECT type, channel_id, channel_username, name, description, ton_min_balance_nano, jetton_address, jetton_min_amount, account_age_max_year FROM giveaway_requirements WHERE giveaway_id=$1`, id)
 	if err == nil {
 		defer rqrows.Close()
 		for rqrows.Next() {
@@ -222,7 +228,8 @@ func (r *GiveawayRepository) GetByID(ctx context.Context, id string) (*dg.Giveaw
 			var ton sql.NullInt64
 			var jaddr sql.NullString
 			var jmin sql.NullInt64
-			if err := rqrows.Scan(&t, &cid, &uname, &name, &desc, &ton, &jaddr, &jmin); err != nil {
+			var ageMax sql.NullInt64
+			if err := rqrows.Scan(&t, &cid, &uname, &name, &desc, &ton, &jaddr, &jmin, &ageMax); err != nil {
 				return nil, err
 			}
 			req := dg.Requirement{Type: dg.RequirementType(t)}
@@ -246,6 +253,9 @@ func (r *GiveawayRepository) GetByID(ctx context.Context, id string) (*dg.Giveaw
 			}
 			if jmin.Valid {
 				req.JettonMinAmount = jmin.Int64
+			}
+			if ageMax.Valid {
+				req.AccountAgeMaxYear = int(ageMax.Int64)
 			}
 			g.Requirements = append(g.Requirements, req)
 		}
