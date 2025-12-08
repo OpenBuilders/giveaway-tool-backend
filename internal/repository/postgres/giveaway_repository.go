@@ -195,18 +195,19 @@ func (r *GiveawayRepository) GetByID(ctx context.Context, id string) (*dg.Giveaw
 		wrows.Close()
 		// Prizes per user
 		prizemap := map[int64][]dg.WinnerPrize{}
-		prows, err := r.db.QueryContext(ctx, `SELECT user_id, prize_title, prize_description FROM giveaway_winner_prizes WHERE giveaway_id=$1`, id)
+		prows, err := r.db.QueryContext(ctx, `SELECT user_id, prize_title, prize_description, quantity FROM giveaway_winner_prizes WHERE giveaway_id=$1`, id)
 		if err != nil {
 			return nil, err
 		}
 		for prows.Next() {
 			var uid int64
 			var t, d string
-			if err := prows.Scan(&uid, &t, &d); err != nil {
+			var qty int
+			if err := prows.Scan(&uid, &t, &d, &qty); err != nil {
 				prows.Close()
 				return nil, err
 			}
-			prizemap[uid] = append(prizemap[uid], dg.WinnerPrize{Title: t, Description: d})
+			prizemap[uid] = append(prizemap[uid], dg.WinnerPrize{Title: t, Description: d, Quantity: qty})
 		}
 		prows.Close()
 		// Build DTO
@@ -498,11 +499,6 @@ func (r *GiveawayRepository) FinishOneWithDistribution(ctx context.Context, id s
 	if err != nil {
 		return err
 	}
-	type prize struct {
-		place       sql.NullInt64
-		title, desc string
-		qty         int
-	}
 	var fixed = map[int][]prize{}
 	var loose []prize
 	for pRows.Next() {
@@ -522,56 +518,8 @@ func (r *GiveawayRepository) FinishOneWithDistribution(ctx context.Context, id s
 	}
 	pRows.Close()
 
-	// Apply fixed-place prizes
-	for place, list := range fixed {
-		if place <= 0 || place > winnersCount {
-			continue
-		}
-		uid := winners[place-1]
-		for _, pr := range list {
-			// Always give one unit to the fixed-place winner
-			if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, uid, pr.title, pr.desc); err != nil {
-				return err
-			}
-			// Distribute remaining quantity across all winners in the general loose pass
-			if pr.qty > 1 {
-				loose = append(loose, prize{title: pr.title, desc: pr.desc, qty: pr.qty - 1})
-			}
-		}
-	}
-
-	// Build list of winners without fixed prize
-	// Deprecated: previously used to prioritize winners without fixed prizes.
-	// New distribution fills the full circle of winners first, then continues round-robin.
-
-	// Distribute loose prizes: first pass give one per winner without fixed
-	idx := 0
-	for _, pr := range loose {
-		remaining := pr.qty
-		// First pass: fill the entire circle of winners (one per winner) before any second unit
-		if winnersCount > 0 {
-			firstRound := remaining
-			if firstRound > winnersCount {
-				firstRound = winnersCount
-			}
-			for i := 0; i < firstRound; i++ {
-				uid := winners[(idx+i)%winnersCount]
-				if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, uid, pr.title, pr.desc); err != nil {
-					return err
-				}
-			}
-			idx += firstRound
-			remaining -= firstRound
-		}
-		// Round-robin for remaining units
-		for remaining > 0 && winnersCount > 0 {
-			uid := winners[idx%winnersCount]
-			if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, uid, pr.title, pr.desc); err != nil {
-				return err
-			}
-			remaining--
-			idx++
-		}
+	if err := r.distributePrizes(ctx, tx, id, winners, fixed, loose); err != nil {
+		return err
 	}
 
 	// Mark giveaway finished
@@ -653,11 +601,6 @@ func (r *GiveawayRepository) FinishWithWinners(ctx context.Context, id string, w
 	if err != nil {
 		return err
 	}
-	type prize struct {
-		place       sql.NullInt64
-		title, desc string
-		qty         int
-	}
 	var fixed = map[int][]prize{}
 	var loose []prize
 	for pRows.Next() {
@@ -677,53 +620,8 @@ func (r *GiveawayRepository) FinishWithWinners(ctx context.Context, id string, w
 	}
 	pRows.Close()
 
-	// Apply fixed prizes
-	for place, list := range fixed {
-		if place <= 0 || place > winnersCount {
-			continue
-		}
-		uid := winners[place-1]
-		for _, pr := range list {
-			// Give one to the fixed-place winner
-			if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, uid, pr.title, pr.desc); err != nil {
-				return err
-			}
-			// Remaining quantity goes to loose distribution
-			if pr.qty > 1 {
-				loose = append(loose, prize{title: pr.title, desc: pr.desc, qty: pr.qty - 1})
-			}
-		}
-	}
-
-	// New strategy: fill the full circle of winners first, then continue round-robin
-
-	// Distribute loose prizes
-	idx := 0
-	for _, pr := range loose {
-		remaining := pr.qty
-		// First pass: one unit per winner until we cover all winners or run out
-		if winnersCount > 0 {
-			firstRound := remaining
-			if firstRound > winnersCount {
-				firstRound = winnersCount
-			}
-			for i := 0; i < firstRound; i++ {
-				uid := winners[(idx+i)%winnersCount]
-				if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, uid, pr.title, pr.desc); err != nil {
-					return err
-				}
-			}
-			idx += firstRound
-			remaining -= firstRound
-		}
-		for remaining > 0 && winnersCount > 0 {
-			uid := winners[idx%winnersCount]
-			if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, uid, pr.title, pr.desc); err != nil {
-				return err
-			}
-			remaining--
-			idx++
-		}
+	if err := r.distributePrizes(ctx, tx, id, winners, fixed, loose); err != nil {
+		return err
 	}
 
 	if _, err = tx.ExecContext(ctx, `UPDATE giveaways SET status='completed', updated_at=now() WHERE id=$1`, id); err != nil {
@@ -778,11 +676,6 @@ func (r *GiveawayRepository) SetManualWinners(ctx context.Context, id string, wi
 	if err != nil {
 		return err
 	}
-	type prize struct {
-		place       sql.NullInt64
-		title, desc string
-		qty         int
-	}
 	var fixed = map[int][]prize{}
 	var loose []prize
 	for pRows.Next() {
@@ -802,52 +695,8 @@ func (r *GiveawayRepository) SetManualWinners(ctx context.Context, id string, wi
 	}
 	pRows.Close()
 
-	winnersCount := len(winners)
-	// Apply fixed prizes
-	for place, list := range fixed {
-		if place <= 0 || place > winnersCount {
-			continue
-		}
-		uid := winners[place-1]
-		for _, pr := range list {
-			// Give one unit to fixed-place winner; distribute the rest as loose
-			if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, uid, pr.title, pr.desc); err != nil {
-				return err
-			}
-			if pr.qty > 1 {
-				loose = append(loose, prize{title: pr.title, desc: pr.desc, qty: pr.qty - 1})
-			}
-		}
-	}
-
-	// Distribute loose prizes using first pass one-per across all winners and then round-robin
-	idx := 0
-	for _, pr := range loose {
-		remaining := pr.qty
-		// First pass: cover all winners once if possible
-		if winnersCount > 0 {
-			firstRound := remaining
-			if firstRound > winnersCount {
-				firstRound = winnersCount
-			}
-			for i := 0; i < firstRound; i++ {
-				uid := winners[(idx+i)%winnersCount]
-				if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, uid, pr.title, pr.desc); err != nil {
-					return err
-				}
-			}
-			idx += firstRound
-			remaining -= firstRound
-		}
-		// Second pass: round-robin across all winners
-		for remaining > 0 && winnersCount > 0 {
-			uid := winners[idx%winnersCount]
-			if _, err = tx.ExecContext(ctx, `INSERT INTO giveaway_winner_prizes (giveaway_id, user_id, prize_title, prize_description) VALUES ($1,$2,$3,$4)`, id, uid, pr.title, pr.desc); err != nil {
-				return err
-			}
-			remaining--
-			idx++
-		}
+	if err := r.distributePrizes(ctx, tx, id, winners, fixed, loose); err != nil {
+		return err
 	}
 
 	// Keep status pending
@@ -878,18 +727,19 @@ func (r *GiveawayRepository) ListWinnersWithPrizes(ctx context.Context, id strin
 	wrows.Close()
 
 	prizemap := map[int64][]dg.WinnerPrize{}
-	prows, err := r.db.QueryContext(ctx, `SELECT user_id, prize_title, prize_description FROM giveaway_winner_prizes WHERE giveaway_id=$1`, id)
+	prows, err := r.db.QueryContext(ctx, `SELECT user_id, prize_title, prize_description, quantity FROM giveaway_winner_prizes WHERE giveaway_id=$1`, id)
 	if err != nil {
 		return nil, err
 	}
 	for prows.Next() {
 		var uid int64
 		var t, d string
-		if err := prows.Scan(&uid, &t, &d); err != nil {
+		var qty int
+		if err := prows.Scan(&uid, &t, &d, &qty); err != nil {
 			prows.Close()
 			return nil, err
 		}
-		prizemap[uid] = append(prizemap[uid], dg.WinnerPrize{Title: t, Description: d})
+		prizemap[uid] = append(prizemap[uid], dg.WinnerPrize{Title: t, Description: d, Quantity: qty})
 	}
 	prows.Close()
 
