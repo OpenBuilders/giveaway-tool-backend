@@ -396,6 +396,33 @@ func (r *GiveawayRepository) ListExpiredIDs(ctx context.Context) ([]string, erro
 	return ids, rows.Err()
 }
 
+// ListCompletedWithParticipantsNoWinners returns IDs of giveaways that are completed,
+// have participants, but have no winners assigned, and do not have custom requirements.
+func (r *GiveawayRepository) ListCompletedWithParticipantsNoWinners(ctx context.Context) ([]string, error) {
+	const q = `
+		SELECT g.id
+		FROM giveaways g
+		WHERE g.status = 'completed'
+		  AND EXISTS (SELECT 1 FROM giveaway_participants p WHERE p.giveaway_id = g.id)
+		  AND NOT EXISTS (SELECT 1 FROM giveaway_winners w WHERE w.giveaway_id = g.id)
+		  AND NOT EXISTS (SELECT 1 FROM giveaway_requirements r WHERE r.giveaway_id = g.id AND r.type = 'custom')
+	`
+	rows, err := r.db.QueryContext(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // FinishOneWithDistribution finalizes a single giveaway: selects winners by place, assigns fixed-place prizes,
 // and randomly distributes unassigned prizes among winners without a fixed prize. If extra prizes remain,
 // distributes in round-robin starting from place 1.

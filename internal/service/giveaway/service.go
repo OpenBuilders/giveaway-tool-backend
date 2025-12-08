@@ -358,6 +358,25 @@ func (s *Service) FinishExpired(ctx context.Context) (int64, error) {
 	return done, nil
 }
 
+// ReprocessCompletedNoWinners finds completed giveaways with participants but no winners, and triggers distribution for them.
+func (s *Service) ReprocessCompletedNoWinners(ctx context.Context) (int64, error) {
+	ids, err := s.repo.ListCompletedWithParticipantsNoWinners(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var done int64
+	for _, id := range ids {
+		// Use FinishOneWithDistribution to re-distribute winners.
+		// It will check requirements and persist winners.
+		if err := s.FinishOneWithDistribution(ctx, id); err != nil {
+			// Continue on error to not block other giveaways
+			continue
+		}
+		done++
+	}
+	return done, nil
+}
+
 // FinishOneWithDistribution finalizes one giveaway with distribution logic.
 func (s *Service) FinishOneWithDistribution(ctx context.Context, id string) error {
 	if id == "" {
