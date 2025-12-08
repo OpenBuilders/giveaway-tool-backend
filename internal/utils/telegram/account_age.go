@@ -1,134 +1,77 @@
 package telegram
 
 import (
-	"math"
-	"sort"
-	"time"
+	"strconv"
 )
 
-var ages = map[int64]int64{
-	2768409:    1383264000000,
-	7679610:    1388448000000,
-	11538514:   1391212000000,
-	15835244:   1392940000000,
-	23646077:   1393459000000,
-	38015510:   1393632000000,
-	44634663:   1399334000000,
-	46145305:   1400198000000,
-	54845238:   1411257000000,
-	63263518:   1414454000000,
-	101260938:  1425600000000,
-	101323197:  1426204000000,
-	111220210:  1429574000000,
-	103258382:  1432771000000,
-	103151531:  1433376000000,
-	116812045:  1437696000000,
-	122600695:  1437782000000,
-	109393468:  1439078000000,
-	112594714:  1439683000000,
-	124872445:  1439856000000,
-	130029930:  1441324000000,
-	125828524:  1444003000000,
-	133909606:  1444176000000,
-	157242073:  1446768000000,
-	143445125:  1448928000000,
-	148670295:  1452211000000,
-	152079341:  1453420000000,
-	171295414:  1457481000000,
-	181783990:  1460246000000,
-	222021233:  1465344000000,
-	225034354:  1466208000000,
-	278941742:  1473465000000,
-	285253072:  1476835000000,
-	294851037:  1479600000000,
-	297621225:  1481846000000,
-	328594461:  1482969000000,
-	337808429:  1487707000000,
-	341546272:  1487782000000,
-	352940995:  1487894000000,
-	369669043:  1490918000000,
-	400169472:  1501459000000,
-	805158066:  1563208000000,
-	1974255900: 1634000000000,
+// IDRange defines a range of IDs corresponding to a specific registration year.
+type IDRange struct {
+	Start int64
+	End   int64
+	Year  int
 }
 
-type AgeData struct {
-	minID int64
-	maxID int64
-}
-
-// Global instance to avoid rebuilding pool every time
-var agePool *AgeData
-var sortedKeys []int64
-
-func init() {
-	agePool = &AgeData{}
-	for k := range ages {
-		if agePool.minID == 0 || k < agePool.minID {
-			agePool.minID = k
-		}
-		if agePool.maxID == 0 || k > agePool.maxID {
-			agePool.maxID = k
-		}
-		sortedKeys = append(sortedKeys, k)
-	}
-	sort.Slice(sortedKeys, func(i, j int) bool {
-		return sortedKeys[i] < sortedKeys[j]
-	})
+var idRanges = []IDRange{
+	{1, 52481424, 2013},
+	{52481425, 112594714, 2014},
+	{112594715, 260972612, 2015},
+	{260972613, 417043996, 2016},
+	{417043997, 619538293, 2017},
+	{619538294, 851921979, 2018},
+	{851921980, 1213088939, 2019},
+	{1213088940, 1974255900, 2020},
+	{1974255901, 3293345067, 2021},
+	{3293345068, 5171460881, 2022},
+	{5171460882, 7320000000, 2023},
+	{7320000001, 9223372036854775807, 2024},
 }
 
 // EstimateAccountYear estimates the registration year of a Telegram user based on their ID.
+// Returns 0 if the ID is invalid (negative).
+// Returns 2025 for IDs higher than the last known range (implied by "everything higher is 2025").
 func EstimateAccountYear(userID int64) int {
 	if userID < 0 {
 		return 0
 	}
-	_, date := agePool.GetAsDatetime(userID)
-	return date.Year()
+
+	for _, r := range idRanges {
+		if userID >= r.Start && userID <= r.End {
+			return r.Year
+		}
+	}
+
+	// The prompt says "everything higher is 2025".
+	// The last range covers up to max int64 (9223372036854775807).
+	// So theoretically this part is unreachable unless we update ranges,
+	// but logically if it exceeds known ranges it's likely very new.
+	// Since 2024 range ends at max int64, let's strictly follow the ranges.
+	// However, if the user provides a new range list in the future that doesn't cover max int64,
+	// this fallback is useful.
+	// Given the provided ranges end at MaxInt64 with 2024,
+	// there is actually no "higher" than MaxInt64 for int64.
+	// Wait, checking the prompt again: "{7320000001, 9223372036854775807, 2024}, all above is 2025".
+	// Since 9223372036854775807 is MaxInt64, "above" isn't possible in int64.
+	// Perhaps the user meant if I modify the last range?
+	// Or maybe the user meant "current year" logic.
+	// But let's stick to the ranges.
+	// Actually, if I look closely at the provided ranges, the last one IS 2024.
+	// And the user text says "everything above is 2025".
+	// Since the last range goes to MaxInt64, effectively 2025 is impossible to reach with int64 here.
+	// I will just implement the loop.
+
+	// If by some chance we have gaps or future updates:
+	if userID > idRanges[len(idRanges)-1].End {
+		return 2025
+	}
+
+	return 0
 }
 
 // EstimateAccountYearString returns the year as a string.
 func EstimateAccountYearString(userID int64) string {
-	// Not used in new logic, but keeping for compatibility if needed or removed if unused.
-	// For now, simpler to implement via EstimateAccountYear
-	return time.Now().Format("2006") // Placeholder or implementation?
-	// The user asked to replace the previous logic. Previous logic returned "2014-2015" strings.
-	// Since the core logic is now exact dates, returning just the year string is fine.
 	y := EstimateAccountYear(userID)
 	if y == 0 {
 		return "Unknown"
 	}
-	return dateToString(y)
-}
-
-func dateToString(year int) string {
-	// Primitive conversion
-	return time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC).Format("2006")
-}
-
-// GetAsDatetime calculates the creation date based on the provided integer value.
-func (a *AgeData) GetAsDatetime(v int64) (int, time.Time) {
-	if v < a.minID {
-		return -1, time.Unix(ages[a.minID]/1000, 0)
-	} else if v > a.maxID {
-		return 1, time.Unix(ages[a.maxID]/1000, 0)
-	}
-
-	lowerID := a.minID
-	for _, k := range sortedKeys {
-		if v <= k {
-			lage := float64(ages[lowerID]) / 1000
-			uage := float64(ages[k]) / 1000
-			// avoid division by zero if lowerID == k (should not happen due to unique keys and loop logic)
-			denom := float64(k - lowerID)
-			if denom == 0 {
-				return 0, time.Unix(int64(uage), 0)
-			}
-			vRatio := float64(v-lowerID) / denom
-			midDate := math.Floor((vRatio * (uage - lage)) + lage)
-			return 0, time.Unix(int64(midDate), 0)
-		}
-		lowerID = k
-	}
-
-	return 0, time.Time{}
+	return strconv.Itoa(y)
 }
