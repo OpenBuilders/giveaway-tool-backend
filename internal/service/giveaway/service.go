@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"log"
 
 	"github.com/google/uuid"
 	dg "github.com/open-builders/giveaway-backend/internal/domain/giveaway"
@@ -722,6 +723,7 @@ func (s *Service) CheckRequirements(ctx context.Context, uid int64, reqs []dg.Re
 	for _, req := range reqs {
 		res := s.CheckSingleRequirement(ctx, uid, &req)
 		if res.Status != "success" {
+			log.Printf("Requirement check failed for user=%d type=%s: error=%s", uid, req.Type, res.Error)
 			return false
 		}
 	}
