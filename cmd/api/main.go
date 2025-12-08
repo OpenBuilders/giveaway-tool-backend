@@ -18,6 +18,7 @@ import (
 	gsvc "github.com/open-builders/giveaway-backend/internal/service/giveaway"
 	notify "github.com/open-builders/giveaway-backend/internal/service/notifications"
 	tg "github.com/open-builders/giveaway-backend/internal/service/telegram"
+	"github.com/open-builders/giveaway-backend/internal/service/tonbalance"
 	usersvc "github.com/open-builders/giveaway-backend/internal/service/user"
 	"github.com/open-builders/giveaway-backend/internal/workers"
 	migfs "github.com/open-builders/giveaway-backend/migrations"
@@ -68,13 +69,25 @@ func main() {
 	expSvc := gsvc.NewService(expRepo, chs)
 	// Attach Telegram + notifications so worker can emit completion messages
 	tgClient := tg.NewClientFromEnv()
+	// TON balance via TonAPI
+	tbs := tonbalance.NewService(cfg.TonAPIBaseURL, cfg.TonAPIToken).WithCache(rdb, 0)
 
 	// user service for username/first name in notifications
 	urepo := pgrepo.NewUserRepository(pg)
 	ucache := rcache.NewUserCache(rdb, 5*time.Second)
 	usvc := usersvc.NewService(urepo, ucache)
 	notifier := notify.NewService(tgClient, chs, cfg.WebAppBaseURL, rdb, usvc)
-	expSvc = expSvc.WithTelegram(tgClient).WithNotifier(notifier).WithUser(usvc)
+	expSvc = expSvc.WithTelegram(tgClient).WithNotifier(notifier).WithUser(usvc).WithTonBalance(tbs)
+
+	// Check for completed giveaways with no winners and re-process them on startup
+	go func() {
+		if n, err := expSvc.ReprocessCompletedNoWinners(context.Background()); err != nil {
+			log.Printf("reprocess completed no winners error: %v", err)
+		} else if n > 0 {
+			log.Printf("reprocessed %d completed giveaways with no winners", n)
+		}
+	}()
+
 	go func() {
 		ticker := time.NewTicker(time.Duration(cfg.GiveawayExpireIntervalSec) * time.Second)
 		defer ticker.Stop()

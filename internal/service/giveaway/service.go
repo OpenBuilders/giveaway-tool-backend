@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"log"
 
 	"github.com/google/uuid"
 	dg "github.com/open-builders/giveaway-backend/internal/domain/giveaway"
@@ -349,6 +350,25 @@ func (s *Service) FinishExpired(ctx context.Context) (int64, error) {
 	}
 	var done int64
 	for _, id := range ids {
+		if err := s.FinishOneWithDistribution(ctx, id); err != nil {
+			// Continue on error to not block other giveaways
+			continue
+		}
+		done++
+	}
+	return done, nil
+}
+
+// ReprocessCompletedNoWinners finds completed giveaways with participants but no winners, and triggers distribution for them.
+func (s *Service) ReprocessCompletedNoWinners(ctx context.Context) (int64, error) {
+	ids, err := s.repo.ListCompletedWithParticipantsNoWinners(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var done int64
+	for _, id := range ids {
+		// Use FinishOneWithDistribution to re-distribute winners.
+		// It will check requirements and persist winners.
 		if err := s.FinishOneWithDistribution(ctx, id); err != nil {
 			// Continue on error to not block other giveaways
 			continue
@@ -703,6 +723,7 @@ func (s *Service) CheckRequirements(ctx context.Context, uid int64, reqs []dg.Re
 	for _, req := range reqs {
 		res := s.CheckSingleRequirement(ctx, uid, &req)
 		if res.Status != "success" {
+			log.Printf("Requirement check failed for user=%d type=%s: error=%s", uid, req.Type, res.Error)
 			return false
 		}
 	}
