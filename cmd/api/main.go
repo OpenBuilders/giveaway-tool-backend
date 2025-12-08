@@ -80,13 +80,13 @@ func main() {
 	expSvc = expSvc.WithTelegram(tgClient).WithNotifier(notifier).WithUser(usvc).WithTonBalance(tbs)
 
 	// Check for completed giveaways with no winners and re-process them on startup
-	go func() {
-		if n, err := expSvc.ReprocessCompletedNoWinners(context.Background()); err != nil {
-			log.Printf("reprocess completed no winners error: %v", err)
-		} else if n > 0 {
-			log.Printf("reprocessed %d completed giveaways with no winners", n)
-		}
-	}()
+	// go func() {
+	// 	if n, err := expSvc.ReprocessCompletedNoWinners(context.Background()); err != nil {
+	// 		log.Printf("reprocess completed no winners error: %v", err)
+	// 	} else if n > 0 {
+	// 		log.Printf("reprocessed %d completed giveaways with no winners", n)
+	// 	}
+	// }()
 
 	go func() {
 		ticker := time.NewTicker(time.Duration(cfg.GiveawayExpireIntervalSec) * time.Second)
