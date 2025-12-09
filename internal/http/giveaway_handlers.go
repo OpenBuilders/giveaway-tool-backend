@@ -1042,7 +1042,7 @@ func (h *GiveawayHandlersFiber) exportWinnersCSV(c *fiber.Ctx) error {
 	// UTF-8 BOM for Excel compatibility with Cyrillic
 	_, _ = buf.Write([]byte{0xEF, 0xBB, 0xBF})
 	writer := csv.NewWriter(&buf)
-	_ = writer.Write([]string{"place", "user_id", "username", "first_name", "last_name", "wallet_address", "prize_title", "prize_description"})
+	_ = writer.Write([]string{"place", "user_id", "username", "first_name", "last_name", "wallet_address", "prize_title", "prize_description", "prize_quantity"})
 	for _, w := range winners {
 		var username, firstName, lastName, wallet string
 		if h.users != nil {
@@ -1063,6 +1063,7 @@ func (h *GiveawayHandlersFiber) exportWinnersCSV(c *fiber.Ctx) error {
 				wallet,
 				"",
 				"",
+				"",
 			})
 			continue
 		}
@@ -1076,6 +1077,7 @@ func (h *GiveawayHandlersFiber) exportWinnersCSV(c *fiber.Ctx) error {
 				wallet,
 				p.Title,
 				p.Description,
+				strconv.Itoa(p.Quantity),
 			})
 		}
 	}

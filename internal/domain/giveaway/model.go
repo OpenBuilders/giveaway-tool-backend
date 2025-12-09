@@ -60,6 +60,7 @@ type Giveaway struct {
 type WinnerPrize struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
+	Quantity    int    `json:"quantity"`
 }
 
 // Winner represents a winner with place and assigned prizes.
